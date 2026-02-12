@@ -15,30 +15,9 @@ export default function AuthScreen({ onAuthenticated, isDark }: AuthScreenProps)
     const [username, setUsername] = useState('');
     const [passphrase, setPassphrase] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [status, setStatus] = useState('');
     const [error, setError] = useState('');
     const [serverAccount, setServerAccount] = useState<{ salt: string; kdfParams: any } | null>(null);
-
-    const handleLookupSalt = async () => {
-        if (!username) return alert('Enter Username first');
-        setIsLoading(true);
-        setError('');
-
-        const socket = getSocket();
-        socket.connect();
-        socket.emit('get_salt', username);
-
-        socket.once('salt_found', (data: { uuid: string; salt: string; kdfParams: any }) => {
-            setServerAccount({ salt: data.salt, kdfParams: data.kdfParams });
-            setIsLoading(false);
-            console.log('✅ Salt found on server for user:', username);
-        });
-
-        socket.once('salt_not_found', () => {
-            setServerAccount(null);
-            setIsLoading(false);
-            console.log('ℹ️ Username is available/not found on server.');
-        });
-    };
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -46,36 +25,64 @@ export default function AuthScreen({ onAuthenticated, isDark }: AuthScreenProps)
 
         setIsLoading(true);
         setError('');
+        setStatus('Initializing secure tunnel...');
 
         try {
-            // Priority 1: Check if we have server-retrieved salt
-            // Priority 2: Check if account exists locally in Dexie
-            let salt: string;
-            let kdfParams: any;
+            const socket = getSocket();
 
+            // 1. Connection check first
+            setStatus('Connecting to relay server...');
+            const connected = await waitForConnection(5000);
+            if (!connected) {
+                throw new Error('Relay server is unreachable. Check your connection.');
+            }
+
+            // 2. Lookup salt if not already found
+            let currentSalt = serverAccount?.salt;
+            let currentKdf = serverAccount?.kdfParams;
+
+            if (!currentSalt) {
+                setStatus('Retrieving account metadata...');
+                const lookupPromise = new Promise<{ salt: string; kdfParams: any } | null>((resolve) => {
+                    const t = setTimeout(() => {
+                        socket.off('salt_found');
+                        socket.off('salt_not_found');
+                        resolve(null);
+                    }, 3000);
+
+                    socket.once('salt_found', (data: { uuid: string; salt: string; kdfParams: any }) => {
+                        clearTimeout(t);
+                        resolve({ salt: data.salt, kdfParams: data.kdfParams });
+                    });
+                    socket.once('salt_not_found', () => {
+                        clearTimeout(t);
+                        resolve(null);
+                    });
+                });
+
+                socket.emit('get_salt', username);
+                const result = await lookupPromise;
+                if (result) {
+                    currentSalt = result.salt;
+                    currentKdf = result.kdfParams;
+                    setServerAccount(result);
+                }
+            }
+
+            // 3. Key Derivation (Argon2)
+            setStatus('Deriving encryption keys (Argon2)...');
             const existingLocalAccount = await db.accounts.where('username').equals(username).first();
 
-            if (serverAccount) {
-                salt = serverAccount.salt;
-                kdfParams = serverAccount.kdfParams;
-            } else if (existingLocalAccount) {
-                salt = existingLocalAccount.salt;
-                kdfParams = existingLocalAccount.kdfParams;
-            } else {
-                // New user - generate fresh salt
-                salt = crypto.randomUUID();
-                kdfParams = { time: 2, mem: 16384, hashLen: 64 };
-            }
+            let salt: string = currentSalt || existingLocalAccount?.salt || crypto.randomUUID();
+            let kdfParams: any = currentKdf || existingLocalAccount?.kdfParams || { time: 2, mem: 16384, hashLen: 64 };
 
             const keys = await generateKeys(passphrase, salt);
             const accountUuid = keys.accountUuid;
             const encryptionKey = keys.encryptionKey;
 
-            // Integrity check if we have an existing local record
+            // Integrity check for local records
             if (existingLocalAccount && accountUuid !== existingLocalAccount.id) {
-                setError('Incorrect passphrase for this username.');
-                setIsLoading(false);
-                return;
+                throw new Error('Incorrect passphrase for this username.');
             }
 
             // Save to local DB if it's new
@@ -88,21 +95,18 @@ export default function AuthScreen({ onAuthenticated, isDark }: AuthScreenProps)
                 });
             }
 
-            // Verify server connection
-            const connected = await waitForConnection(3000);
-            if (!connected) {
-                setError('Relay server is unreachable. Please check your connection.');
-                setIsLoading(false);
-                return;
-            }
+            setStatus('Finalizing authentication...');
+            // Wait a tiny bit for UI smoothness
+            await new Promise(r => setTimeout(r, 500));
 
             // Authentication successful
             onAuthenticated(accountUuid, encryptionKey, username, salt, kdfParams);
-        } catch (err) {
+        } catch (err: any) {
             console.error(err);
-            setError('Auth failed. Please try again.');
+            setError(err.message || 'Auth failed. Please try again.');
         } finally {
             setIsLoading(false);
+            setStatus('');
         }
     };
 
@@ -128,7 +132,6 @@ export default function AuthScreen({ onAuthenticated, isDark }: AuthScreenProps)
                                 placeholder="Username"
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
-                                onBlur={handleLookupSalt}
                                 className={`w-full pl-10 pr-4 py-3 rounded-xl border outline-none transition-all ${isDark
                                     ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:border-purple-500'
                                     : 'bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-400 focus:border-purple-500'
@@ -155,6 +158,7 @@ export default function AuthScreen({ onAuthenticated, isDark }: AuthScreenProps)
                         </div>
                     </div>
 
+                    {status && <p className="text-purple-500 text-[11px] text-center animate-pulse">{status}</p>}
                     {error && <p className="text-red-500 text-xs text-center">{error}</p>}
 
                     <button
