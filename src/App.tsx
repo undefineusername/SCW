@@ -5,8 +5,9 @@ import ConversationList from '@/components/conversation-list'
 import ChatHeader from '@/components/chat-header'
 import SettingsModal from '@/components/settings-modal'
 import AuthScreen from '@/components/auth-screen'
-import { useChat } from '@/hooks/use-chat'
+import { useChat, DECRYPTION_ERROR_MSG, NO_KEY_ERROR_MSG } from '@/hooks/use-chat'
 import { db } from '@/lib/db'
+import { decryptMessage, deriveKeyFromSecret } from '@/lib/crypto'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { motion } from 'framer-motion'
 import Navigation from '@/components/navigation'
@@ -135,6 +136,51 @@ export default function App() {
   const handleSecretChange = async (newSecret: string) => {
     if (selectedConversation) {
       await db.conversations.update(selectedConversation, { secret: newSecret });
+
+      // Re-decrypt messages that failed previously
+      if (newSecret) {
+        try {
+          const newKey = await deriveKeyFromSecret(newSecret);
+          const messagesToRetry = await db.messages
+            .where('from').equals(selectedConversation)
+            .or('to').equals(selectedConversation)
+            .filter(msg =>
+              msg.text === DECRYPTION_ERROR_MSG ||
+              msg.text === NO_KEY_ERROR_MSG
+            )
+            .toArray();
+
+          console.log(`🔄 Attempting to re-decrypt ${messagesToRetry.length} messages...`);
+
+          for (const msg of messagesToRetry) {
+            if (msg.rawPayload) {
+              try {
+                const decryptedText = await decryptMessage(new Uint8Array(msg.rawPayload), newKey);
+                await db.messages.update(msg.id!, { text: decryptedText });
+              } catch (e) {
+                console.warn(`Failed to re-decrypt message ${msg.msgId} even with new secret`);
+              }
+            }
+          }
+
+          // Finally update conversation's last message with the latest message from DB
+          const latestMsg = await db.messages
+            .where('from').equals(selectedConversation)
+            .or('to').equals(selectedConversation)
+            .reverse()
+            .sortBy('timestamp')
+            .then(msgs => msgs[0]);
+
+          if (latestMsg) {
+            await db.conversations.update(selectedConversation, {
+              lastMessage: latestMsg.text,
+              lastTimestamp: latestMsg.timestamp
+            });
+          }
+        } catch (err) {
+          console.error("Error during re-decryption process:", err);
+        }
+      }
     }
   }
 

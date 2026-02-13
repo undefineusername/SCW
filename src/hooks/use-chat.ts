@@ -4,6 +4,9 @@ import { db, type LocalMessage } from '@/lib/db';
 import { encryptMessage, decryptMessage, deriveKeyFromSecret } from '@/lib/crypto';
 import { useLiveQuery } from 'dexie-react-hooks';
 
+export const DECRYPTION_ERROR_MSG = "[🔒 암호화된 메시지 - Key가 맞지 않음]";
+export const NO_KEY_ERROR_MSG = "[🔒 암호화된 메시지 - Key가 설정되지 않음]";
+
 export function useChat(
     user: { uuid: string; key: Uint8Array; username: string; salt?: string; kdfParams?: any } | null,
     selectedConversationUuid: string | null
@@ -66,10 +69,10 @@ export function useChat(
                             // Try fallback to master key if secret failed
                             text = await decryptMessage(payloadBytes, encryptionKey);
                         } catch (e2) {
-                            text = "[🔒 암호화된 메시지 - Key가 맞지 않음]";
+                            text = DECRYPTION_ERROR_MSG;
                         }
                     } else {
-                        text = "[🔒 암호화된 메시지 - Key가 설정되지 않음]";
+                        text = NO_KEY_ERROR_MSG;
                     }
                 }
 
@@ -83,6 +86,7 @@ export function useChat(
                     from: data.from,
                     to: data.to,
                     text: text,
+                    rawPayload: Array.from(payloadBytes), // Store as regular array for DB
                     timestamp: new Date(data.timestamp),
                     status: (isEcho || isCurrentChat) ? 'read' : 'sent',
                     isEcho
@@ -219,12 +223,16 @@ export function useChat(
 
             const encryptedData = await encryptMessage(text, activeKey);
 
+            // Convert Uint8Array to regular array
+            const payloadArray = Array.from(encryptedData);
+
             // Save to local DB first (optimistic)
             await db.messages.add({
                 msgId,
                 from: currentUserUuid,
                 to: toUuid,
                 text,
+                rawPayload: payloadArray,
                 timestamp: new Date(),
                 status: 'sending'
             });
@@ -237,9 +245,6 @@ export function useChat(
                     lastTimestamp: new Date()
                 });
             }
-
-            // Convert Uint8Array to regular array for socket.io transmission
-            const payloadArray = Array.from(encryptedData);
 
             // Send to relay using relay protocol
             socket.emit('relay', {

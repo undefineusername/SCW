@@ -6,6 +6,7 @@ export interface LocalMessage {
     from: string;
     to: string;
     text: string;
+    rawPayload?: number[]; // Store encrypted data for future re-decryption
     timestamp: Date;
     status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
     isEcho?: boolean;
