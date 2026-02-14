@@ -239,6 +239,7 @@ export default function App() {
             isDark={isDark}
             currentUser={currentUser}
             onNewChat={handleNewChat}
+            sendMessage={sendMessage}
           />
         )}
 

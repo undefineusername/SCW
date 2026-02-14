@@ -151,6 +151,53 @@ export function useChat(
                         }
                     }
 
+                    // --- System Message Handler ---
+                    try {
+                        // Attempt to parse as JSON to check for system messages
+                        if (text.startsWith('{') && text.endsWith('}')) {
+                            const payload = JSON.parse(text);
+                            if (payload.system === true && payload.type) {
+                                console.log(`⚙️ System Message Received: ${payload.type} from ${data.from}`);
+
+                                if (payload.type === 'FRIEND_REQUEST') {
+                                    // Received a Friend Request
+                                    const existing = await db.friends.get(data.from);
+                                    if (!existing) {
+                                        await db.friends.add({
+                                            uuid: data.from,
+                                            username: payload.username || `User-${data.from.slice(0, 8)}`,
+                                            isBlocked: false,
+                                            status: 'pending_incoming',
+                                            dhPublicKey: senderPubRaw ? await crypto.subtle.exportKey(
+                                                'jwk',
+                                                await crypto.subtle.importKey(
+                                                    'raw', senderPubRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, []
+                                                )
+                                            ) as JsonWebKey : undefined
+                                        });
+                                    } else if (existing.status === 'pending_outgoing') {
+                                        // Crossed requests - Auto accept
+                                        await db.friends.update(data.from, { status: 'friend' });
+                                    }
+                                    return; // Stop processing - don't add to messages
+                                }
+                                else if (payload.type === 'FRIEND_ACCEPT') {
+                                    // Friend Request Accepted
+                                    await db.friends.update(data.from, { status: 'friend' });
+                                    return;
+                                }
+                                else if (payload.type === 'FRIEND_REJECT') {
+                                    // Friend Request Rejected - remove or ignore
+                                    await db.friends.delete(data.from);
+                                    await db.conversations.delete(data.from); // Optional: delete conversation
+                                    return;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Not a JSON system message, ignore and treat as text
+                    }
+
                     // Use msgId from data if available (e.g. from newer protocol), or generate one
                     const msgId = data.msgId || `msg_${data.timestamp}_${data.from}`;
 
@@ -348,24 +395,39 @@ export function useChat(
             // Convert Uint8Array to regular array
             const payloadArray = Array.from(finalPayload);
 
-            // Save to local DB first (optimistic)
-            await db.messages.add({
-                msgId,
-                from: currentUserUuid,
-                to: toUuid,
-                text,
-                rawPayload: payloadArray,
-                timestamp: new Date(),
-                status: 'sending'
-            });
+            // Check if it is a system message to avoid saving to DB
+            let isSystemMessage = false;
+            try {
+                if (text.startsWith('{') && text.endsWith('}')) {
+                    const payload = JSON.parse(text);
+                    if (payload.system === true && payload.type && (payload.type.startsWith('FRIEND_'))) {
+                        isSystemMessage = true;
+                    }
+                }
+            } catch (e) { }
 
-            // Update conversation
-            const existingConv = await db.conversations.get(toUuid);
-            if (existingConv) {
-                await db.conversations.update(toUuid, {
-                    lastMessage: text,
-                    lastTimestamp: new Date()
+            // Save to local DB first (optimistic) - ONLY if NOT system message
+            if (!isSystemMessage) {
+                await db.messages.add({
+                    msgId,
+                    from: currentUserUuid,
+                    to: toUuid,
+                    text,
+                    rawPayload: payloadArray,
+                    timestamp: new Date(),
+                    status: 'sending'
                 });
+
+                // Update conversation
+                const existingConv = await db.conversations.get(toUuid);
+                if (existingConv) {
+                    await db.conversations.update(toUuid, {
+                        lastMessage: text,
+                        lastTimestamp: new Date()
+                    });
+                }
+            } else {
+                console.log(`📤 Sending System Message: ${text}`);
             }
 
             // Send to relay using relay protocol

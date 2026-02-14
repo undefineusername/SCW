@@ -1,4 +1,4 @@
-import { Plus, Search } from 'lucide-react';
+import { Search, Check, X, UserPlus, Clock } from 'lucide-react';
 import { db } from '@/lib/db';
 import { getSocket } from '@/lib/socket';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -7,10 +7,15 @@ interface FriendsListProps {
     isDark: boolean;
     currentUser: { uuid: string; username: string };
     onNewChat: (uuid: string) => void;
+    sendMessage: (to: string, text: string) => Promise<string | undefined>;
 }
 
-export default function FriendsList({ isDark, currentUser, onNewChat }: FriendsListProps) {
+export default function FriendsList({ isDark, currentUser, onNewChat, sendMessage }: FriendsListProps) {
     const friends = useLiveQuery(() => db.friends.toArray()) || [];
+
+    const activeFriends = friends.filter(f => !f.status || f.status === 'friend');
+    const incomingRequests = friends.filter(f => f.status === 'pending_incoming');
+    const outgoingRequests = friends.filter(f => f.status === 'pending_outgoing');
 
     const handleAddFriend = () => {
         const username = prompt('Enter Username to find:');
@@ -19,28 +24,78 @@ export default function FriendsList({ isDark, currentUser, onNewChat }: FriendsL
             socket.emit('get_salt', username.trim());
 
             socket.once('salt_found', async (data: { uuid: string; publicKey?: any }) => {
-                alert(`User found: ${username}\nID: ${data.uuid}`);
+                const existing = await db.friends.get(data.uuid);
 
-                // Add to friends list automatically to save key
-                await db.friends.put({
-                    uuid: data.uuid,
-                    username: username.trim(),
-                    isBlocked: false,
-                    dhPublicKey: data.publicKey // Save the Public Key!
-                });
+                if (existing) {
+                    if (existing.status === 'friend') {
+                        alert('Already friends!');
+                        return;
+                    } else if (existing.status === 'pending_outgoing') {
+                        alert('Request already sent!');
+                        return;
+                    } else if (existing.status === 'pending_incoming') {
+                        alert('User already sent you a request! Check your requests.');
+                        return;
+                    }
+                }
 
-                onNewChat(data.uuid);
+                if (confirm(`User found: ${username}\nID: ${data.uuid}\n\nSend friend request?`)) {
+                    // 1. Add to pending outgoing
+                    await db.friends.put({
+                        uuid: data.uuid,
+                        username: username.trim(),
+                        isBlocked: false,
+                        dhPublicKey: data.publicKey, // Save the Public Key!
+                        status: 'pending_outgoing'
+                    });
+
+                    // 2. Send Request Message
+                    await sendMessage(data.uuid, JSON.stringify({
+                        system: true,
+                        type: 'FRIEND_REQUEST',
+                        username: currentUser.username
+                    }));
+
+                    alert('Friend request sent!');
+                }
             });
 
             socket.once('salt_not_found', () => {
                 alert('User not found.');
-                const directUuid = prompt('User not found by name. Enter UUID directly if you have it:');
-                if (directUuid) {
-                    // We can't verify UUID or get Key if we just type UUID. 
-                    // But for now allow it.
-                    onNewChat(directUuid.trim());
-                }
+                // Maybe allow raw UUID add here too?
             });
+        }
+    };
+
+    const handleAccept = async (uuid: string, username: string) => {
+        await db.friends.update(uuid, { status: 'friend' });
+        await sendMessage(uuid, JSON.stringify({
+            system: true,
+            type: 'FRIEND_ACCEPT',
+            username: currentUser.username
+        }));
+        // Create conversation entry
+        const exists = await db.conversations.get(uuid);
+        if (!exists) {
+            await db.conversations.add({
+                id: uuid,
+                username: username,
+                avatar: '👤',
+                lastMessage: 'Friend request accepted',
+                lastTimestamp: new Date(),
+                unreadCount: 0
+            });
+        }
+    };
+
+    const handleReject = async (uuid: string) => {
+        if (confirm('Reject this friend request?')) {
+            await db.friends.delete(uuid);
+            await sendMessage(uuid, JSON.stringify({
+                system: true,
+                type: 'FRIEND_REJECT',
+                username: currentUser.username
+            }));
         }
     };
 
@@ -52,7 +107,7 @@ export default function FriendsList({ isDark, currentUser, onNewChat }: FriendsL
                     onClick={handleAddFriend}
                     className={`p-2 rounded-lg ${isDark ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-600'}`}
                 >
-                    <Plus size={20} />
+                    <UserPlus size={20} />
                 </button>
             </div>
 
@@ -90,21 +145,82 @@ export default function FriendsList({ isDark, currentUser, onNewChat }: FriendsL
                     </div>
                 </div>
 
-                <div className="mx-5 h-px bg-gray-100 dark:bg-gray-800" />
+                <div className="mx-5 h-px bg-gray-100 dark:bg-gray-800 mb-4" />
 
-                <div className="p-5">
+                {/* Friend Requests Section */}
+                {incomingRequests.length > 0 && (
+                    <div className="px-5 mb-6">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-[11px] font-bold text-blue-500 uppercase tracking-widest">Requests</span>
+                            <span className="text-[11px] font-bold text-blue-500">{incomingRequests.length}</span>
+                        </div>
+                        <div className="space-y-2">
+                            {incomingRequests.map(req => (
+                                <div key={req.uuid} className={`p-3 rounded-xl flex items-center justify-between ${isDark ? 'bg-gray-800/50' : 'bg-blue-50'}`}>
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${isDark ? 'bg-gray-700' : 'bg-white'}`}>
+                                            👤
+                                        </div>
+                                        <div>
+                                            <p className={`text-sm font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{req.username}</p>
+                                            <p className="text-[9px] text-gray-500">Wants to be friends</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => handleAccept(req.uuid, req.username)}
+                                            className="p-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                                        >
+                                            <Check size={14} />
+                                        </button>
+                                        <button
+                                            onClick={() => handleReject(req.uuid)}
+                                            className={`p-1.5 ${isDark ? 'bg-gray-700 hover:bg-gray-600' : 'bg-white hover:bg-gray-200'} text-gray-500 rounded-lg transition-colors`}
+                                        >
+                                            <X size={14} />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Outgoing Requests Section (Optional but good) */}
+                {outgoingRequests.length > 0 && (
+                    <div className="px-5 mb-6">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">Sent</span>
+                            <span className="text-[11px] font-bold text-gray-400">{outgoingRequests.length}</span>
+                        </div>
+                        <div className="space-y-1">
+                            {outgoingRequests.map(req => (
+                                <div key={req.uuid} className={`p-2 px-3 rounded-xl flex items-center justify-between opacity-70 ${isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-50'}`}>
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs ${isDark ? 'bg-gray-800' : 'bg-gray-200'}`}>
+                                            <Clock size={12} />
+                                        </div>
+                                        <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>{req.username}</span>
+                                    </div>
+                                    <span className="text-[9px] text-gray-400">Pending</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                <div className="px-5">
                     <div className="flex items-center justify-between mb-4">
                         <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">Contacts</span>
-                        <span className="text-[11px] font-bold text-gray-400">{friends.length}</span>
+                        <span className="text-[11px] font-bold text-gray-400">{activeFriends.length}</span>
                     </div>
                     <div className="space-y-1">
-                        {friends.length === 0 ? (
-                            <p className={`text-xs text-center py-12 ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>
-                                Invite friends using their UUID<br />
-                                to start a secure pipeline.
+                        {activeFriends.length === 0 ? (
+                            <p className={`text-xs text-center py-8 ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>
+                                No friends yet.
                             </p>
                         ) : (
-                            friends.map(friend => (
+                            activeFriends.map(friend => (
                                 <button
                                     key={friend.uuid}
                                     onClick={() => onNewChat(friend.uuid)}

@@ -29,6 +29,7 @@ export interface Friend {
     statusMessage?: string;
     isBlocked: boolean;
     dhPublicKey?: JsonWebKey;
+    status?: 'friend' | 'pending_incoming' | 'pending_outgoing';
 }
 
 export interface UserAccount {
@@ -60,6 +61,15 @@ export class ChatDatabase extends Dexie {
         this.version(3).stores({
             accounts: 'id, username', // Keys are just properties, not indexed
             friends: 'uuid, username, isBlocked'
+        });
+
+        // Version 4: Add friend status
+        this.version(4).stores({
+            friends: 'uuid, username, isBlocked, status'
+        }).upgrade(tx => {
+            return tx.table('friends').toCollection().modify(friend => {
+                if (!friend.status) friend.status = 'friend';
+            });
         });
     }
 }
