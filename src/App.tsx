@@ -24,11 +24,11 @@ const themeColors: Record<Theme, { bg: string; accent: string; light: string }> 
 }
 
 export default function App() {
-  const [theme, setTheme] = useState<Theme>('purple')
-  const [isDark, setIsDark] = useState(false)
+  const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('chat-theme') as Theme) || 'purple')
+  const [isDark, setIsDark] = useState(() => localStorage.getItem('chat-dark-mode') === 'true')
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
-  const [fontSize, setFontSize] = useState<'sm' | 'md' | 'lg'>('md')
-  const [fontFamily, setFontFamily] = useState<'sans' | 'serif'>('sans')
+  const [fontSize, setFontSize] = useState<'sm' | 'md' | 'lg'>(() => (localStorage.getItem('chat-font-size') as 'sm' | 'md' | 'lg') || 'md')
+  const [fontFamily, setFontFamily] = useState<'sans' | 'serif'>(() => (localStorage.getItem('chat-font-family') as 'sans' | 'serif') || 'sans')
 
   const [currentUser, setCurrentUser] = useState<{ uuid: string; key: Uint8Array; username: string; salt?: string; kdfParams?: any } | null>(null)
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null)
@@ -64,6 +64,29 @@ export default function App() {
     };
     loadUser();
   }, []);
+
+  // Save settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('chat-theme', theme)
+  }, [theme])
+
+  useEffect(() => {
+    localStorage.setItem('chat-dark-mode', String(isDark))
+    // Also toggle the 'dark' class on the document for Tailwind's dark: utilities
+    if (isDark) {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+  }, [isDark])
+
+  useEffect(() => {
+    localStorage.setItem('chat-font-size', fontSize)
+  }, [fontSize])
+
+  useEffect(() => {
+    localStorage.setItem('chat-font-family', fontFamily)
+  }, [fontFamily])
 
   const handleAuthenticated = (uuid: string, key: Uint8Array, username: string, salt?: string, kdfParams?: any) => {
     localStorage.setItem(`key_${uuid}`, JSON.stringify(Array.from(key)));
@@ -257,7 +280,7 @@ export default function App() {
         )}
 
         {activeTab === 'settings' && (
-          <div className="flex flex-col h-full bg-white dark:bg-gray-900 font-sans">
+          <div className={`flex flex-col h-full ${isDark ? 'bg-gray-900' : 'bg-white'}`}>
             <h2 className={`text-xl font-bold p-5 ${isDark ? 'text-white' : 'text-gray-900'}`}>Settings</h2>
 
             <div className="flex-1 overflow-y-auto px-5 space-y-6">
