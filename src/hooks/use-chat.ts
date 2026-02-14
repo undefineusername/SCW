@@ -1,7 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getSocket, registerMaster } from '@/lib/socket';
 import { db, type LocalMessage } from '@/lib/db';
-import { encryptMessage, decryptMessage, deriveKeyFromSecret } from '@/lib/crypto';
+import {
+    encryptMessage,
+    decryptMessage,
+    deriveKeyFromSecret,
+    generateDHKeyPair,
+    deriveSharedSecretFromRaw,
+    deriveSharedSecret,
+    exportPublicKeyToRaw
+} from '@/lib/crypto';
 import { useLiveQuery } from 'dexie-react-hooks';
 
 export const DECRYPTION_ERROR_MSG = "[🔒 암호화된 메시지 - Key가 맞지 않음]";
@@ -18,172 +26,242 @@ export function useChat(
     // Use Dexie's live query to automatically update UI on DB changes
     const conversations = useLiveQuery(() => db.conversations.toArray()) || [];
 
+    // Check/Generate DH Keys
+    useEffect(() => {
+        if (!currentUserUuid) return;
+
+        const checkKeys = async () => {
+            const account = await db.accounts.get(currentUserUuid);
+            if (account && !account.dhPrivateKey) {
+                console.log("🔑 Generating new DH Key Pair for", currentUserUuid);
+                const keys = await generateDHKeyPair();
+                await db.accounts.update(currentUserUuid, {
+                    dhPrivateKey: keys.privateKey,
+                    dhPublicKey: keys.publicKey
+                });
+                console.log("✅ DH Keys Generated and Saved.");
+            }
+        };
+        checkKeys();
+    }, [currentUserUuid]);
+
     useEffect(() => {
         if (!currentUserUuid || !encryptionKey) return;
 
-        // Register as master with the relay server
-        const socket = registerMaster({
-            uuid: user!.uuid,
-            username: user!.username,
-            salt: user!.salt,
-            kdfParams: user!.kdfParams
-        });
+        const initSocket = async () => {
+            // Get latest account state for keys
+            const account = await db.accounts.get(currentUserUuid);
 
-        // Sync initial state
-        setIsConnected(socket.connected);
+            // Register as master with the relay server
+            const socket = registerMaster({
+                uuid: user!.uuid,
+                username: user!.username,
+                salt: user!.salt,
+                kdfParams: user!.kdfParams,
+                publicKey: account?.dhPublicKey // Send Public Key to Server!
+            });
 
-        const onConnect = () => setIsConnected(true);
-        const onDisconnect = () => setIsConnected(false);
+            // Sync initial state
+            setIsConnected(socket.connected);
 
-        // Handle incoming messages from the Transparent Pipeline Relay
-        const onRawPush = async (data: { from: string; to: string; payload: any; timestamp: number; type?: string; msgId?: string }) => {
-            const isEcho = data.type === 'echo' || data.from === currentUserUuid;
+            const onConnect = () => setIsConnected(true);
+            const onDisconnect = () => setIsConnected(false);
 
-            try {
-                let payloadBytes: Uint8Array;
-                if (data.payload instanceof Uint8Array) {
-                    payloadBytes = data.payload;
-                } else if (Array.isArray(data.payload)) {
-                    payloadBytes = new Uint8Array(data.payload);
-                } else if (typeof data.payload === 'object' && data.payload.data) {
-                    payloadBytes = new Uint8Array(data.payload.data);
-                } else {
-                    console.error('Unknown payload format:', data.payload);
-                    return;
-                }
+            // Handle incoming messages from the Transparent Pipeline Relay
+            const onRawPush = async (data: { from: string; to: string; payload: any; timestamp: number; type?: string; msgId?: string }) => {
+                const isEcho = data.type === 'echo' || data.from === currentUserUuid;
 
-                // Find active key for decryption
-                let activeKey = encryptionKey;
-                let conversationId = isEcho ? data.to : data.from;
-                const conv = await db.conversations.get(conversationId);
-                if (conv?.secret) {
-                    activeKey = await deriveKeyFromSecret(conv.secret);
-                }
-
-                let text: string;
                 try {
-                    text = await decryptMessage(payloadBytes, activeKey);
-                } catch (e) {
-                    if (activeKey !== encryptionKey) {
-                        try {
-                            // Try fallback to master key if secret failed
-                            text = await decryptMessage(payloadBytes, encryptionKey);
-                        } catch (e2) {
-                            text = DECRYPTION_ERROR_MSG;
-                        }
+                    let fullPayload: Uint8Array;
+                    if (data.payload instanceof Uint8Array) {
+                        fullPayload = data.payload;
+                    } else if (Array.isArray(data.payload)) {
+                        fullPayload = new Uint8Array(data.payload);
+                    } else if (typeof data.payload === 'object' && data.payload.data) {
+                        fullPayload = new Uint8Array(data.payload.data);
                     } else {
-                        text = NO_KEY_ERROR_MSG;
+                        console.error('Unknown payload format:', data.payload);
+                        return;
+                    }
+
+                    // --- Ultra Legend Protocol: Parser ---
+                    // Format: [1 byte PubKeyLen][PubKeyBytes][EncryptedData]
+                    // If classic format (no DH), it fails or assumes whole is encrypted.
+                    // We detect by checking length byte? Or just try/catch?
+
+                    // Simple Heuristic: If we can't derive a key, we assume it's legacy or error.
+                    // But for this new version, let's assume all messages use the protocol.
+
+                    let senderPubRaw: Uint8Array | null = null;
+                    let encryptedBytes: Uint8Array = fullPayload;
+
+                    // Check if we have prefix
+                    // P-384 raw key is usually 97 bytes. 
+                    const pubKeyLen = fullPayload[0];
+                    if (pubKeyLen === 97 && fullPayload.length > 98) {
+                        senderPubRaw = fullPayload.slice(1, 98);
+                        encryptedBytes = fullPayload.slice(98);
+                    }
+
+                    let activeKey = encryptionKey;
+
+                    // If we found a Public Key in payload, let's try to derive/update secret
+                    if (senderPubRaw && !isEcho && account?.dhPrivateKey) {
+                        try {
+                            // Derive Shared Secret
+                            const sharedSecret = await deriveSharedSecretFromRaw(account.dhPrivateKey, senderPubRaw);
+
+                            // Update Conversation with this new secret
+                            await db.conversations.put({
+                                id: data.from, // Conversation ID is the sender
+                                username: `User-${data.from.slice(0, 8)}`, // Fallback name
+                                avatar: '👤',
+                                lastMessage: '',
+                                lastTimestamp: new Date(),
+                                unreadCount: 0,
+                                secret: sharedSecret // STORE THE SHARED SECRET!
+                            });
+                            console.log("🔐 Shared Secret Derived from Incoming Message PubKey");
+                        } catch (e) {
+                            console.error("Failed to derive secret from payload key", e);
+                        }
+                    }
+
+                    let conversationId = isEcho ? data.to : data.from;
+                    const conv = await db.conversations.get(conversationId);
+
+                    if (conv?.secret) {
+                        activeKey = await deriveKeyFromSecret(conv.secret);
+                    }
+
+                    let text: string;
+                    try {
+                        text = await decryptMessage(encryptedBytes, activeKey);
+                    } catch (e) {
+                        // Fallback logic for legacy messages or failed derivation
+                        console.warn("Decryption failed, trying fallback...", e);
+                        if (activeKey !== encryptionKey) {
+                            try {
+                                text = await decryptMessage(fullPayload, encryptionKey); // Try original payload
+                            } catch (e2) {
+                                text = DECRYPTION_ERROR_MSG;
+                            }
+                        } else {
+                            text = NO_KEY_ERROR_MSG;
+                        }
+                    }
+
+                    // Use msgId from data if available (e.g. from newer protocol), or generate one
+                    const msgId = data.msgId || `msg_${data.timestamp}_${data.from}`;
+
+                    const isCurrentChat = data.from === selectedConversationUuid;
+
+                    const message: LocalMessage = {
+                        msgId,
+                        from: data.from,
+                        to: data.to,
+                        text: text,
+                        rawPayload: Array.from(fullPayload),
+                        timestamp: new Date(data.timestamp),
+                        status: (isEcho || isCurrentChat) ? 'read' : 'sent',
+                        isEcho
+                    };
+
+                    const exists = await db.messages.where('msgId').equals(msgId).first();
+                    if (!exists) {
+                        await db.messages.add(message);
+                        console.log(`📥 Message saved: ${msgId}`);
+                    }
+
+                    // Only send ACK if it's NOT an echo AND we are currently viewing this chat
+                    if (!isEcho && isCurrentChat) {
+                        console.log(`📤 Sending ACK for ${msgId} to ${data.from} (Chat Active)`);
+                        socket.emit('msg_ack', { to: data.from, msgId });
+                    }
+
+                    // Update conversation list
+                    const convUpdate = {
+                        lastMessage: text,
+                        lastTimestamp: new Date(data.timestamp),
+                        unreadCount: (!isEcho && !isCurrentChat) ? (conv?.unreadCount || 0) + 1 : 0
+                    };
+
+                    if (conv) {
+                        await db.conversations.update(conversationId, convUpdate);
+                    } else if (!isEcho) {
+                        await db.conversations.add({
+                            id: conversationId,
+                            username: `User-${conversationId.slice(0, 8)}`,
+                            avatar: '👤',
+                            ...convUpdate
+                        });
+                    }
+                } catch (err) {
+                    console.error('Failed to decrypt or save incoming message:', err);
+                }
+            };
+
+            // Handle offline message queue flush
+            const onQueueFlush = async (payloads: any[]) => {
+                console.log(`📦 Received ${payloads.length} queued messages`);
+                for (const payload of payloads) {
+                    await onRawPush(payload);
+                }
+            };
+
+            // Handle dispatch status from server
+            const onDispatchStatus = async ({ to, status }: { to: string; msgId: string; status: string }) => {
+                console.log(`📡 Dispatch status to ${to}: ${status}`);
+                const recentMsg = await db.messages
+                    .where('to').equals(to)
+                    .and(msg => msg.from === currentUserUuid)
+                    .reverse()
+                    .first();
+
+                if (recentMsg) {
+                    if (status === 'delivered' || status === 'queued') {
+                        await db.messages.update(recentMsg.id!, { status: 'sent' });
+                    } else if (status === 'dropped') {
+                        await db.messages.update(recentMsg.id!, { status: 'failed' });
                     }
                 }
+            };
 
-                // Use msgId from data if available (e.g. from newer protocol), or generate one
-                const msgId = data.msgId || `msg_${data.timestamp}_${data.from}`;
-
-                const isCurrentChat = data.from === selectedConversationUuid;
-
-                const message: LocalMessage = {
-                    msgId,
-                    from: data.from,
-                    to: data.to,
-                    text: text,
-                    rawPayload: Array.from(payloadBytes), // Store as regular array for DB
-                    timestamp: new Date(data.timestamp),
-                    status: (isEcho || isCurrentChat) ? 'read' : 'sent',
-                    isEcho
-                };
-
-                const exists = await db.messages.where('msgId').equals(msgId).first();
-                if (!exists) {
-                    await db.messages.add(message);
-                    console.log(`📥 Message saved: ${msgId}`);
+            // Handle Read Receipts
+            const onReadReceipts = async ({ from, msgId }: { from: string; msgId: string }) => {
+                console.log(`📖 Received Read Receipt from ${from} for ${msgId}`);
+                const msg = await db.messages.where('msgId').equals(msgId).first();
+                if (msg && msg.id) {
+                    await db.messages.update(msg.id, { status: 'read' });
                 }
+            };
 
-                // Only send ACK if it's NOT an echo AND we are currently viewing this chat
-                if (!isEcho && isCurrentChat) {
-                    console.log(`📤 Sending ACK for ${msgId} to ${data.from} (Chat Active)`);
-                    socket.emit('msg_ack', { to: data.from, msgId });
-                }
+            socket.on('connect', onConnect);
+            socket.on('disconnect', onDisconnect);
+            socket.on('relay_push', onRawPush);
+            socket.on('queue_flush', onQueueFlush);
+            socket.on('dispatch_status', onDispatchStatus);
+            socket.on('msg_ack_push', onReadReceipts);
 
-                // Update conversation list
-                conversationId = isEcho ? data.to : data.from;
-                const existingConv = await db.conversations.get(conversationId);
-                const convUpdate = {
-                    lastMessage: text,
-                    lastTimestamp: new Date(data.timestamp),
-                    unreadCount: (!isEcho && !isCurrentChat) ? (existingConv?.unreadCount || 0) + 1 : 0
-                };
-
-                if (existingConv) {
-                    await db.conversations.update(conversationId, convUpdate);
-                } else if (!isEcho) {
-                    await db.conversations.add({
-                        id: conversationId,
-                        username: `User-${conversationId.slice(0, 8)}`,
-                        avatar: '👤',
-                        ...convUpdate
-                    });
-                }
-            } catch (err) {
-                console.error('Failed to decrypt or save incoming message:', err);
-            }
+            // Cleanup
+            return () => {
+                socket.off('connect', onConnect);
+                socket.off('disconnect', onDisconnect);
+                socket.off('relay_push', onRawPush);
+                socket.off('queue_flush', onQueueFlush);
+                socket.off('dispatch_status', onDispatchStatus);
+                socket.off('msg_ack_push', onReadReceipts);
+            };
         };
 
-        // Handle offline message queue flush
-        const onQueueFlush = async (payloads: any[]) => {
-            console.log(`📦 Received ${payloads.length} queued messages`);
-            for (const payload of payloads) {
-                await onRawPush(payload);
-            }
-        };
-
-        // Handle dispatch status from server
-        const onDispatchStatus = async ({ to, status }: { to: string; msgId: string; status: string }) => {
-            console.log(`📡 Dispatch status to ${to}: ${status}`);
-            const recentMsg = await db.messages
-                .where('to').equals(to)
-                .and(msg => msg.from === currentUserUuid)
-                .reverse()
-                .first();
-
-            if (recentMsg) {
-                if (status === 'delivered' || status === 'queued') {
-                    await db.messages.update(recentMsg.id!, { status: 'sent' });
-                } else if (status === 'dropped') {
-                    await db.messages.update(recentMsg.id!, { status: 'failed' });
-                }
-            }
-        };
-
-        // Handle Read Receipts
-        const onReadReceipts = async ({ from, msgId }: { from: string; msgId: string }) => {
-            console.log(`📖 Received Read Receipt from ${from} for ${msgId}`);
-            const msg = await db.messages.where('msgId').equals(msgId).first();
-            if (msg && msg.id) {
-                await db.messages.update(msg.id, { status: 'read' });
-                console.log(`✅ Message ${msgId} status updated to READ`);
-            } else {
-                console.warn(`⚠️ Could not find message ${msgId} to update status`);
-            }
-        };
-
-        socket.on('connect', onConnect);
-        socket.on('disconnect', onDisconnect);
-        socket.on('relay_push', onRawPush);
-        socket.on('queue_flush', onQueueFlush);
-        socket.on('dispatch_status', onDispatchStatus);
-        socket.on('msg_ack_push', onReadReceipts);
+        const cleanupPromise = initSocket();
 
         return () => {
-            socket.off('connect', onConnect);
-            socket.off('disconnect', onDisconnect);
-            socket.off('relay_push', onRawPush);
-            socket.off('queue_flush', onQueueFlush);
-            socket.off('dispatch_status', onDispatchStatus);
-            socket.off('msg_ack_push', onReadReceipts);
+            cleanupPromise.then(cleanup => cleanup && cleanup());
         };
     }, [user, selectedConversationUuid]);
 
-    // NEW: Handle "Reading" existing messages when entering a chat
+    // NEW: Handle "Reading" existing messages when entering a chat (Keep existing logic)
     useEffect(() => {
         if (!selectedConversationUuid || !currentUserUuid) return;
 
@@ -216,15 +294,59 @@ export function useChat(
         try {
             // Find active key for encryption
             let activeKey = encryptionKey;
+
+            // Checks for Conversation Secret (Shared Key)
             const conv = await db.conversations.get(toUuid);
             if (conv?.secret) {
                 activeKey = await deriveKeyFromSecret(conv.secret);
+            } else {
+                // If no secret, try to find in Friends list and DERIVE it now?
+                // Or we can rely on protocol: Send my key, let them derive.
+                // BUT I need a key to encrypt FOR THEM.
+                // If I don't have their secret, I MUST use their Public Key to derive it first.
+                // But I can only derive if I know their public key.
+                const friend = await db.friends.get(toUuid);
+                if (friend?.dhPublicKey) {
+                    // We have their Public Key! Derive secret now.
+                    const account = await db.accounts.get(currentUserUuid);
+                    if (account?.dhPrivateKey) {
+                        const sharedSecretStr = await deriveSharedSecret(account.dhPrivateKey, friend.dhPublicKey);
+
+                        // Save it
+                        await db.conversations.update(toUuid, { secret: sharedSecretStr });
+                        activeKey = await deriveKeyFromSecret(sharedSecretStr);
+                    }
+                } else {
+                    console.warn("⚠️ No Shared Secret and No Public Key for recipient. Falling back to encryptionKey (insecure/legacy).");
+                    // In real E2EE, we should block this or fetch key from server.
+                    // But for robustness:
+                }
             }
 
             const encryptedData = await encryptMessage(text, activeKey);
 
+            // --- Ultra Legend Protocol: Packing ---
+            // [97 (len)][MyRawKey (97)][EncryptedData]
+
+            let finalPayload = encryptedData;
+
+            // Get My Public Key to attach
+            const account = await db.accounts.get(currentUserUuid);
+            if (account?.dhPublicKey) {
+                const myRawPub = await exportPublicKeyToRaw(account.dhPublicKey);
+                if (myRawPub.byteLength === 97) {
+                    const packet = new Uint8Array(1 + myRawPub.byteLength + encryptedData.byteLength);
+                    packet[0] = myRawPub.byteLength;
+                    packet.set(myRawPub, 1);
+                    packet.set(encryptedData, 1 + myRawPub.byteLength);
+                    finalPayload = packet;
+                }
+            } else {
+                // Fallback to sending just encrypted (will fail new parser check, fall to legacy)
+            }
+
             // Convert Uint8Array to regular array
-            const payloadArray = Array.from(encryptedData);
+            const payloadArray = Array.from(finalPayload);
 
             // Save to local DB first (optimistic)
             await db.messages.add({
@@ -263,3 +385,4 @@ export function useChat(
 
     return { isConnected, conversations, sendMessage };
 }
+

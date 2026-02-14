@@ -16,7 +16,7 @@ export const getSocket = () => {
     return socket;
 };
 
-export const registerMaster = (details: { uuid: string; username?: string; salt?: string; kdfParams?: any }) => {
+export const registerMaster = (details: { uuid: string; username?: string; salt?: string; kdfParams?: any; publicKey?: any }) => {
     const s = getSocket();
     currentHardwareId = details.uuid;
 

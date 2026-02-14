@@ -4,6 +4,12 @@ import Argon2Worker from './argon2.worker?worker';
 const ALGO = 'AES-GCM';
 const IV_LENGTH = 12;
 
+// ECDH Constants
+const ECDH_ALGO = {
+    name: "ECDH",
+    namedCurve: "P-384"
+};
+
 export async function generateKeys(passphrase: string, salt: string): Promise<{ accountUuid: string; encryptionKey: Uint8Array; hashHex: string }> {
     if (typeof window === 'undefined') return { accountUuid: '', encryptionKey: new Uint8Array(), hashHex: '' };
 
@@ -40,6 +46,100 @@ export async function generateKeys(passphrase: string, salt: string): Promise<{ 
         worker.postMessage({ passphrase, saltUint8 });
     });
 }
+
+// --- ECDH (Diffie-Hellman) Implementation ---
+
+export async function generateDHKeyPair(): Promise<{ privateKey: JsonWebKey; publicKey: JsonWebKey }> {
+    const keyPair = await crypto.subtle.generateKey(
+        ECDH_ALGO,
+        true,
+        ["deriveKey", "deriveBits"]
+    );
+
+    const publicKey = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
+    const privateKey = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
+
+    return { privateKey, publicKey };
+}
+
+export async function exportPublicKeyToRaw(publicKeyJwk: JsonWebKey): Promise<Uint8Array> {
+    const publicKey = await crypto.subtle.importKey(
+        "jwk",
+        publicKeyJwk,
+        ECDH_ALGO,
+        true,
+        []
+    );
+    const raw = await crypto.subtle.exportKey("raw", publicKey);
+    return new Uint8Array(raw);
+}
+
+export async function importPublicKeyFromRaw(raw: Uint8Array): Promise<JsonWebKey> {
+    const publicKey = await crypto.subtle.importKey(
+        "raw",
+        raw as any,
+        ECDH_ALGO,
+        true,
+        []
+    );
+    return await crypto.subtle.exportKey("jwk", publicKey);
+}
+
+async function startDerive(privateKeyJwk: JsonWebKey, publicKey: CryptoKey): Promise<string> {
+    const privateKey = await crypto.subtle.importKey(
+        "jwk",
+        privateKeyJwk,
+        ECDH_ALGO,
+        false,
+        ["deriveBits"]
+    );
+
+    const sharedBits = await crypto.subtle.deriveBits(
+        {
+            name: "ECDH",
+            public: publicKey
+        },
+        privateKey,
+        384
+    );
+
+    const hashBuffer = await crypto.subtle.digest("SHA-256", sharedBits);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    // Provide a safer Base64 string (URL safe not strictly needed but good practice, here we stick to standard)
+    const hashString = btoa(String.fromCharCode.apply(null, hashArray));
+
+    return hashString;
+}
+
+export async function deriveSharedSecret(
+    privateKeyJwk: JsonWebKey,
+    publicKeyJwk: JsonWebKey
+): Promise<string> {
+    const publicKey = await crypto.subtle.importKey(
+        "jwk",
+        publicKeyJwk,
+        ECDH_ALGO,
+        false,
+        []
+    );
+    return startDerive(privateKeyJwk, publicKey);
+}
+
+export async function deriveSharedSecretFromRaw(
+    privateKeyJwk: JsonWebKey,
+    publicKeyRaw: Uint8Array
+): Promise<string> {
+    const publicKey = await crypto.subtle.importKey(
+        "raw",
+        publicKeyRaw as any,
+        ECDH_ALGO,
+        false,
+        []
+    );
+    return startDerive(privateKeyJwk, publicKey);
+}
+
+// --------------------------------------------
 
 export async function encryptMessage(text: string, key: Uint8Array): Promise<Uint8Array> {
     const encoder = new TextEncoder();
@@ -88,6 +188,7 @@ export async function decryptMessage(combined: Uint8Array, key: Uint8Array): Pro
 
     return new TextDecoder().decode(decrypted);
 }
+
 export async function deriveKeyFromSecret(secret: string): Promise<Uint8Array> {
     const encoder = new TextEncoder();
     const keyData = await crypto.subtle.digest("SHA-256", encoder.encode(secret));

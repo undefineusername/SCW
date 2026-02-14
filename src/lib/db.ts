@@ -28,6 +28,7 @@ export interface Friend {
     avatar?: string;
     statusMessage?: string;
     isBlocked: boolean;
+    dhPublicKey?: JsonWebKey;
 }
 
 export interface UserAccount {
@@ -35,8 +36,9 @@ export interface UserAccount {
     username: string;
     salt: string;
     kdfParams: any;
-    // encryptionKey is NO LONGER stored here for security. 
-    // It should be stored in memory/sessionStorage during active session.
+    // DH Key Pair (ECDH P-384) - Stored mainly to regenerate session keys
+    dhPrivateKey?: JsonWebKey;
+    dhPublicKey?: JsonWebKey;
 }
 
 export class ChatDatabase extends Dexie {
@@ -51,6 +53,12 @@ export class ChatDatabase extends Dexie {
             messages: '++id, msgId, from, to, timestamp, status',
             conversations: 'id, username, lastTimestamp',
             accounts: 'id, username',
+            friends: 'uuid, username, isBlocked'
+        });
+
+        // Version 3: Add DH Keys
+        this.version(3).stores({
+            accounts: 'id, username', // Keys are just properties, not indexed
             friends: 'uuid, username, isBlocked'
         });
     }

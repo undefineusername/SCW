@@ -18,15 +18,28 @@ export default function FriendsList({ isDark, currentUser, onNewChat }: FriendsL
             const socket = getSocket();
             socket.emit('get_salt', username.trim());
 
-            socket.once('salt_found', (data: { uuid: string }) => {
+            socket.once('salt_found', async (data: { uuid: string; publicKey?: any }) => {
                 alert(`User found: ${username}\nID: ${data.uuid}`);
+
+                // Add to friends list automatically to save key
+                await db.friends.put({
+                    uuid: data.uuid,
+                    username: username.trim(),
+                    isBlocked: false,
+                    dhPublicKey: data.publicKey // Save the Public Key!
+                });
+
                 onNewChat(data.uuid);
             });
 
             socket.once('salt_not_found', () => {
                 alert('User not found.');
                 const directUuid = prompt('User not found by name. Enter UUID directly if you have it:');
-                if (directUuid) onNewChat(directUuid.trim());
+                if (directUuid) {
+                    // We can't verify UUID or get Key if we just type UUID. 
+                    // But for now allow it.
+                    onNewChat(directUuid.trim());
+                }
             });
         }
     };
