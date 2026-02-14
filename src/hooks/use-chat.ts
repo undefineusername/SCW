@@ -104,24 +104,14 @@ export function useChat(
                     }
 
                     let activeKey = encryptionKey;
+                    let newSharedSecret: string | null = null;
 
                     // If we found a Public Key in payload, let's try to derive/update secret
                     if (senderPubRaw && !isEcho && account?.dhPrivateKey) {
                         try {
                             // Derive Shared Secret
-                            const sharedSecret = await deriveSharedSecretFromRaw(account.dhPrivateKey, senderPubRaw);
-
-                            // Update Conversation with this new secret
-                            await db.conversations.put({
-                                id: data.from, // Conversation ID is the sender
-                                username: `User-${data.from.slice(0, 8)}`, // Fallback name
-                                avatar: '👤',
-                                lastMessage: '',
-                                lastTimestamp: new Date(),
-                                unreadCount: 0,
-                                secret: sharedSecret // STORE THE SHARED SECRET!
-                            });
-                            console.log("🔐 Shared Secret Derived from Incoming Message PubKey");
+                            newSharedSecret = await deriveSharedSecretFromRaw(account.dhPrivateKey, senderPubRaw);
+                            console.log("🔐 Shared Secret Derived from Incoming Message PubKey (Pending Save)");
                         } catch (e) {
                             console.error("Failed to derive secret from payload key", e);
                         }
@@ -130,7 +120,10 @@ export function useChat(
                     let conversationId = isEcho ? data.to : data.from;
                     const conv = await db.conversations.get(conversationId);
 
-                    if (conv?.secret) {
+                    if (newSharedSecret) {
+                        // Use the new secret if we just derived it
+                        activeKey = await deriveKeyFromSecret(newSharedSecret);
+                    } else if (conv?.secret) {
                         activeKey = await deriveKeyFromSecret(conv.secret);
                     }
 
@@ -162,28 +155,62 @@ export function useChat(
                                 if (payload.type === 'FRIEND_REQUEST') {
                                     // Received a Friend Request
                                     const existing = await db.friends.get(data.from);
+
+                                    // Extract Public Key for saving
+                                    const senderJWK = senderPubRaw ? await crypto.subtle.exportKey(
+                                        'jwk',
+                                        await crypto.subtle.importKey(
+                                            'raw', senderPubRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, []
+                                        )
+                                    ) as JsonWebKey : undefined;
+
                                     if (!existing) {
                                         await db.friends.add({
                                             uuid: data.from,
                                             username: payload.username || `User-${data.from.slice(0, 8)}`,
                                             isBlocked: false,
                                             status: 'pending_incoming',
-                                            dhPublicKey: senderPubRaw ? await crypto.subtle.exportKey(
-                                                'jwk',
-                                                await crypto.subtle.importKey(
-                                                    'raw', senderPubRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, []
-                                                )
-                                            ) as JsonWebKey : undefined
+                                            dhPublicKey: senderJWK
                                         });
                                     } else if (existing.status === 'pending_outgoing') {
                                         // Crossed requests - Auto accept
-                                        await db.friends.update(data.from, { status: 'friend' });
+                                        await db.friends.update(data.from, { status: 'friend', dhPublicKey: senderJWK || existing.dhPublicKey });
+
+                                        // Auto-accept means we can form a conversation too? 
+                                        // Yes, if we crossed requests, we are effectively friends.
+                                        if (newSharedSecret) {
+                                            await db.conversations.put({
+                                                id: data.from,
+                                                username: existing.username,
+                                                avatar: '👤',
+                                                lastMessage: 'Friend Request Accepted', // System msg content
+                                                lastTimestamp: new Date(),
+                                                unreadCount: 0,
+                                                secret: newSharedSecret
+                                            });
+                                        }
+                                    } else {
+                                        // Update key if existing friend request matches (e.g. re-sent)
+                                        if (senderJWK) await db.friends.update(data.from, { dhPublicKey: senderJWK });
                                     }
                                     return; // Stop processing - don't add to messages
                                 }
                                 else if (payload.type === 'FRIEND_ACCEPT') {
                                     // Friend Request Accepted
                                     await db.friends.update(data.from, { status: 'friend' });
+
+                                    // NOW we can save the conversation and secret
+                                    if (newSharedSecret) {
+                                        await db.conversations.put({
+                                            id: data.from,
+                                            username: payload.username || `User-${data.from.slice(0, 8)}`,
+                                            avatar: '👤',
+                                            lastMessage: 'Friend Request Accepted',
+                                            lastTimestamp: new Date(),
+                                            unreadCount: 0,
+                                            secret: newSharedSecret
+                                        });
+                                    }
                                     return;
                                 }
                                 else if (payload.type === 'FRIEND_REJECT') {
@@ -196,6 +223,23 @@ export function useChat(
                         }
                     } catch (e) {
                         // Not a JSON system message, ignore and treat as text
+                        console.error("System message parse error", e);
+                    }
+
+                    // --- Normal Message Handling ---
+
+                    // If we have a new secret and it's a valid normal message, SAVE IT NOW
+                    if (newSharedSecret) {
+                        await db.conversations.put({
+                            id: data.from,
+                            username: `User-${data.from.slice(0, 8)}`, // Fallback name, usually exists
+                            avatar: '👤',
+                            lastMessage: '', // will update below
+                            lastTimestamp: new Date(),
+                            unreadCount: 0,
+                            secret: newSharedSecret
+                        });
+                        // Refresh conv object
                     }
 
                     // Use msgId from data if available (e.g. from newer protocol), or generate one
@@ -227,15 +271,19 @@ export function useChat(
                     }
 
                     // Update conversation list
+                    // Re-fetch conversation to ensure we have latest state (including secret if just saved)
+                    const latestConv = await db.conversations.get(conversationId);
+
                     const convUpdate = {
                         lastMessage: text,
                         lastTimestamp: new Date(data.timestamp),
-                        unreadCount: (!isEcho && !isCurrentChat) ? (conv?.unreadCount || 0) + 1 : 0
+                        unreadCount: (!isEcho && !isCurrentChat) ? (latestConv?.unreadCount || 0) + 1 : 0
                     };
 
-                    if (conv) {
+                    if (latestConv) {
                         await db.conversations.update(conversationId, convUpdate);
                     } else if (!isEcho) {
+                        // Should have been created above if secret existed, but fallback
                         await db.conversations.add({
                             id: conversationId,
                             username: `User-${conversationId.slice(0, 8)}`,
