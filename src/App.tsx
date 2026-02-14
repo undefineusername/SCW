@@ -36,6 +36,19 @@ export default function App() {
   const [inputValue, setInputValue] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
+  const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(null);
+
+  // Check for Invite Link
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('invite');
+    if (code) {
+      setPendingInviteCode(code);
+      setActiveTab('friends');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
   // Load user from DB on mount (Persistence)
   useEffect(() => {
     const loadUser = async () => {
@@ -240,6 +253,8 @@ export default function App() {
             currentUser={currentUser}
             onNewChat={handleNewChat}
             sendMessage={sendMessage}
+            pendingInviteCode={pendingInviteCode}
+            onClearInvite={() => setPendingInviteCode(null)}
           />
         )}
 

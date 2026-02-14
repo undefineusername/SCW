@@ -1,71 +1,128 @@
+import { useState, useEffect } from 'react';
 import { Search, Check, X, UserPlus, Clock } from 'lucide-react';
 import { db } from '@/lib/db';
 import { getSocket } from '@/lib/socket';
 import { useLiveQuery } from 'dexie-react-hooks';
+import AddFriendModal from './add-friend-modal';
 
 interface FriendsListProps {
     isDark: boolean;
     currentUser: { uuid: string; username: string };
     onNewChat: (uuid: string) => void;
     sendMessage: (to: string, text: string) => Promise<string | undefined>;
+    pendingInviteCode?: string | null;
+    onClearInvite?: () => void;
 }
 
-export default function FriendsList({ isDark, currentUser, onNewChat, sendMessage }: FriendsListProps) {
+export default function FriendsList({ isDark, currentUser, onNewChat, sendMessage, pendingInviteCode, onClearInvite }: FriendsListProps) {
     const friends = useLiveQuery(() => db.friends.toArray()) || [];
+    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
+    useEffect(() => {
+        if (pendingInviteCode && onClearInvite) {
+            console.log("🔗 Processing Invite Code:", pendingInviteCode);
+            // Small delay to ensure socket is ready? Usually okay.
+            handleAddFriendSubmit(pendingInviteCode);
+            onClearInvite();
+        }
+    }, [pendingInviteCode]);
 
     const activeFriends = friends.filter(f => !f.status || f.status === 'friend');
     const incomingRequests = friends.filter(f => f.status === 'pending_incoming');
     const outgoingRequests = friends.filter(f => f.status === 'pending_outgoing');
 
-    const handleAddFriend = () => {
-        const username = prompt('Enter Username to find:');
-        if (username && username.trim()) {
-            const socket = getSocket();
-            socket.emit('get_salt', username.trim());
+    const handleFoundUser = async (data: { uuid: string; username?: string; publicKey?: any }) => {
+        const username = data.username || `User-${data.uuid.slice(0, 8)}`; // Fallback
+        const existing = await db.friends.get(data.uuid);
 
-            socket.once('salt_found', async (data: { uuid: string; publicKey?: any }) => {
-                const existing = await db.friends.get(data.uuid);
-
-                if (existing) {
-                    if (existing.status === 'friend') {
-                        alert('Already friends!');
-                        return;
-                    } else if (existing.status === 'pending_outgoing') {
-                        alert('Request already sent!');
-                        return;
-                    } else if (existing.status === 'pending_incoming') {
-                        alert('User already sent you a request! Check your requests.');
-                        return;
-                    }
+        if (existing) {
+            if (existing.status === 'friend') {
+                alert('Already friends!');
+                return;
+            } else if (existing.status === 'pending_outgoing') {
+                alert('Request already sent!');
+                return;
+            } else if (existing.status === 'pending_incoming') {
+                if (confirm(`User ${username} already sent you a request! Accept it?`)) {
+                    handleAccept(data.uuid, username);
                 }
+                return;
+            }
+        }
 
-                if (confirm(`User found: ${username}\nID: ${data.uuid}\n\nSend friend request?`)) {
-                    // 1. Add to pending outgoing
-                    await db.friends.put({
-                        uuid: data.uuid,
-                        username: username.trim(),
-                        isBlocked: false,
-                        dhPublicKey: data.publicKey, // Save the Public Key!
-                        status: 'pending_outgoing'
-                    });
+        if (confirm(`User found: ${username}\nID: ${data.uuid}\n\nSend friend request?`)) {
+            // 1. Add to pending outgoing
+            await db.friends.put({
+                uuid: data.uuid,
+                username: username,
+                isBlocked: false,
+                dhPublicKey: data.publicKey, // Save the Public Key if available
+                status: 'pending_outgoing'
+            });
 
-                    // 2. Send Request Message
-                    await sendMessage(data.uuid, JSON.stringify({
-                        system: true,
-                        type: 'FRIEND_REQUEST',
-                        username: currentUser.username
-                    }));
+            // 2. Send Request Message
+            await sendMessage(data.uuid, JSON.stringify({
+                system: true,
+                type: 'FRIEND_REQUEST',
+                username: currentUser.username
+            }));
 
-                    alert('Friend request sent!');
-                }
+            alert('Friend request sent!');
+            setIsAddModalOpen(false);
+        }
+    };
+
+    const handleAddFriendSubmit = (input: string) => {
+        const socket = getSocket();
+
+        // Setup temporary listeners for this specific request
+        // NOTE: In a real app, move these to a permanent useEffect to avoid duplicate listeners or memory leaks
+        // But for simplicity in this flow, using .once() is okay if we are careful.
+
+        // HEURISTIC: If input is exactly 6 alphanumeric chars, try Code Resolution first.
+        // Otherwise, assume Username.
+        const isCode = /^[a-zA-Z0-9]{6}$/.test(input);
+
+        if (isCode) {
+            console.log("🔍 Trying to resolve invite code:", input);
+            socket.emit('resolve_invite_code', input);
+
+            socket.once('invite_code_resolved', (data: any) => {
+                handleFoundUser(data);
+                // Clean up other listener
+                socket.off('invite_code_error');
+            });
+
+            socket.once('invite_code_error', (err: { message: string }) => {
+                // If code fails, maybe it was a short username? Fallback to get_salt?
+                // But generally 6-char codes are distinct. 
+                // Let's just alert error.
+                alert(`Invite Code Error: ${err.message}`);
+                socket.off('invite_code_resolved');
+            });
+        } else {
+            console.log("🔍 Searching by username:", input);
+            socket.emit('get_salt', input);
+
+            socket.once('salt_found', (data: any) => {
+                handleFoundUser({ ...data, username: input });
+                socket.off('salt_not_found');
             });
 
             socket.once('salt_not_found', () => {
-                alert('User not found.');
-                // Maybe allow raw UUID add here too?
+                // Try as raw UUID?
+                if (input.length > 20) { // Simple check for UUID-like length
+                    if (confirm(`User not found by name. Is '${input}' a UUID? Try adding directly?`)) {
+                        handleFoundUser({ uuid: input, username: `User-${input.slice(0, 5)}...` });
+                    }
+                } else {
+                    alert('User not found.');
+                }
+                socket.off('salt_found');
             });
         }
     };
+
 
     const handleAccept = async (uuid: string, username: string) => {
         await db.friends.update(uuid, { status: 'friend' });
@@ -101,10 +158,17 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
 
     return (
         <div className="flex flex-col h-full">
+            <AddFriendModal
+                isOpen={isAddModalOpen}
+                onClose={() => setIsAddModalOpen(false)}
+                onAddFriend={handleAddFriendSubmit}
+                isDark={isDark}
+            />
+
             <div className="p-5 flex items-center justify-between">
                 <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Friends</h2>
                 <button
-                    onClick={handleAddFriend}
+                    onClick={() => setIsAddModalOpen(true)}
                     className={`p-2 rounded-lg ${isDark ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-600'}`}
                 >
                     <UserPlus size={20} />
