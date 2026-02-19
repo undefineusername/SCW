@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Send, Settings, LogOut, Lock as LockIcon, UserPlus, ShieldAlert, X as XIcon } from 'lucide-react'
 import ChatMessage, { DateDivider } from '@/components/chat-message'
 import ConversationList from '@/components/conversation-list'
@@ -6,12 +6,16 @@ import ChatHeader from '@/components/chat-header'
 import SettingsModal from '@/components/settings-modal'
 import AuthScreen from '@/components/auth-screen'
 import { useChat, DECRYPTION_ERROR_MSG, NO_KEY_ERROR_MSG } from '@/hooks/use-chat'
+import { useChatActions } from '@/hooks/chat/use-chat-actions'
 import { db } from '@/lib/db'
 import { decryptMessage, deriveKeyFromSecret } from '@/lib/crypto'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { motion } from 'framer-motion'
 import Navigation from '@/components/navigation'
 import FriendsList from '@/components/friends-list'
+import { useVoiceCall } from '@/hooks/use-voice-call'
+import IncomingCallDialog from '@/components/incoming-call-dialog'
+import VoiceCallOverlay from '@/components/voice-call-overlay'
 
 type Theme = 'purple' | 'blue' | 'green' | 'orange' | 'pink'
 
@@ -115,9 +119,33 @@ export default function App() {
     }
   };
 
+  const { sendMessage: dispatchMessage } = useChatActions(currentUser?.uuid || null, currentUser?.key || null, currentUser);
+
+  const handleWebRTCSignal = useCallback((to: string, signal: any) => {
+    dispatchMessage(to, JSON.stringify({
+      system: true,
+      type: 'WEBRTC_SIGNAL',
+      signal
+    }));
+  }, [dispatchMessage]);
+
+  const {
+    callState,
+    remotePeerUuid,
+    remoteStream,
+    isMuted: isCallMuted,
+    startCall,
+    acceptCall,
+    rejectCall,
+    endCall,
+    handleSignal,
+    toggleMute
+  } = useVoiceCall(currentUser?.uuid || null, handleWebRTCSignal);
+
   const { isConnected, sendMessage, presence } = useChat(
     currentUser,
-    selectedConversation
+    selectedConversation,
+    handleSignal
   );
 
   const conversations = useLiveQuery(() => db.conversations.toArray()) || [];
@@ -473,6 +501,7 @@ export default function App() {
               isOnline={presence[selectedConversation] === 'online'}
               isGroup={conversations.find((c: any) => c.id === selectedConversation)?.isGroup}
               participants={(conversations.find((c: any) => c.id === selectedConversation)?.participants || []) as any[]}
+              onVoiceCall={() => startCall(selectedConversation)}
             />
 
             {/* Stranger Banner (O/X) */}
@@ -635,7 +664,6 @@ export default function App() {
         )}
       </div>
 
-      {/* Settings Modal */}
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
@@ -649,6 +677,27 @@ export default function App() {
         onFontFamilyChange={setFontFamily}
         avatar={currentUser?.avatar}
         onUpdateAvatar={handleUpdateAvatar}
+      />
+
+      {/* Voice Call UI */}
+      <IncomingCallDialog
+        isOpen={callState === 'incoming'}
+        callerName={friends.find(f => f.uuid === remotePeerUuid)?.username || conversations.find(c => c.id === remotePeerUuid)?.username || 'Unknown'}
+        callerAvatar={friends.find(f => f.uuid === remotePeerUuid)?.avatar || conversations.find(c => c.id === remotePeerUuid)?.avatar}
+        onAccept={acceptCall}
+        onReject={rejectCall}
+        isDark={isDark}
+      />
+
+      <VoiceCallOverlay
+        callState={callState}
+        remoteName={friends.find(f => f.uuid === remotePeerUuid)?.username || conversations.find(c => c.id === remotePeerUuid)?.username || 'Unknown'}
+        remoteAvatar={friends.find(f => f.uuid === remotePeerUuid)?.avatar || conversations.find(c => c.id === remotePeerUuid)?.avatar}
+        isMuted={isCallMuted}
+        onToggleMute={toggleMute}
+        onEndCall={endCall}
+        isDark={isDark}
+        remoteStream={remoteStream}
       />
     </div >
   )

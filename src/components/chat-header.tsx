@@ -21,6 +21,8 @@ interface ChatHeaderProps {
   onSecretChange: (secret: string) => void
   isGroup?: boolean
   participants?: Participant[]
+  onVoiceCall?: () => void
+  onVideoCall?: () => void
 }
 
 const themeColorMap: Record<string, { hover: string; hoverDark: string; icon: string; iconDark: string; badge: string }> = {
@@ -33,7 +35,8 @@ const themeColorMap: Record<string, { hover: string; hoverDark: string; icon: st
 
 export default function ChatHeader({
   name, avatar, themeAccent, isDark, fontSize, isOnline,
-  secret, onSecretChange, isGroup, participants = []
+  secret, onSecretChange, isGroup, participants = [],
+  onVoiceCall, onVideoCall
 }: ChatHeaderProps) {
   const [isEditingSecret, setIsEditingSecret] = useState(false)
   const [tempSecret, setTempSecret] = useState(secret || '')
@@ -143,10 +146,18 @@ export default function ChatHeader({
               </button>
             )}
 
-            <button className={`p-2 rounded-lg transition-colors ${hoverClass}`}>
+            <button
+              className={`p-2 rounded-lg transition-colors ${hoverClass} disabled:opacity-30`}
+              onClick={onVoiceCall}
+              disabled={isGroup}
+            >
               <Phone size={17} className={iconClass} />
             </button>
-            <button className={`p-2 rounded-lg transition-colors ${hoverClass}`}>
+            <button
+              className={`p-2 rounded-lg transition-colors ${hoverClass} disabled:opacity-30`}
+              onClick={onVideoCall}
+              disabled={isGroup}
+            >
               <Video size={17} className={iconClass} />
             </button>
           </div>

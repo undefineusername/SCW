@@ -9,7 +9,8 @@ export { DECRYPTION_ERROR_MSG, NO_KEY_ERROR_MSG } from './chat/chat-utils';
 
 export function useChat(
     user: { uuid: string; key: Uint8Array; username: string; avatar?: string; salt?: string; kdfParams?: any } | null,
-    selectedConversationUuid: string | null
+    selectedConversationUuid: string | null,
+    onWebRTCSignal?: (from: string, signal: any) => void
 ) {
     const currentUserUuid = user?.uuid || null;
     const encryptionKey = user?.key || null;
@@ -24,7 +25,7 @@ export function useChat(
     const { sendMessage, markAsRead } = useChatActions(currentUserUuid, encryptionKey, user);
 
     // 2. Socket & Message Processing
-    const { isConnected } = useChatSocket(user, selectedConversationUuid, sendMessage, setPresence);
+    const { isConnected } = useChatSocket(user, selectedConversationUuid, sendMessage, setPresence, onWebRTCSignal);
 
     // 3. Presence Polling
     useChatPresence(selectedConversationUuid, isConnected);

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { registerMaster } from '@/lib/socket';
 import { db, type LocalMessage } from '@/lib/db';
 import {
@@ -13,11 +13,17 @@ export function useChatSocket(
     user: { uuid: string; key: Uint8Array; username: string; avatar?: string; salt?: string; kdfParams?: any } | null,
     selectedConversationUuid: string | null,
     sendMessage: (toUuid: string, text: string) => Promise<string | undefined>,
-    setPresence: React.Dispatch<React.SetStateAction<Record<string, "online" | "offline">>>
+    setPresence: React.Dispatch<React.SetStateAction<Record<string, "online" | "offline">>>,
+    onWebRTCSignal?: (from: string, signal: any) => void
 ) {
     const [isConnected, setIsConnected] = useState(false);
     const currentUserUuid = user?.uuid || null;
     const encryptionKey = user?.key || null;
+
+    const onWebRTCSignalRef = useRef(onWebRTCSignal);
+    useEffect(() => {
+        onWebRTCSignalRef.current = onWebRTCSignal;
+    }, [onWebRTCSignal]);
 
     useEffect(() => {
         if (!currentUserUuid || !encryptionKey) return;
@@ -245,6 +251,11 @@ export function useChatSocket(
                                 } else if (payload.type === 'FRIEND_REJECT') {
                                     await db.friends.delete(data.from);
                                     await db.conversations.delete(data.from);
+                                    return;
+                                } else if (payload.type === 'WEBRTC_SIGNAL') {
+                                    if (onWebRTCSignalRef.current) {
+                                        onWebRTCSignalRef.current(data.from, payload.signal);
+                                    }
                                     return;
                                 }
                             }
