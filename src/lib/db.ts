@@ -10,6 +10,10 @@ export interface LocalMessage {
     timestamp: Date;
     status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
     isEcho?: boolean;
+    // Reply System
+    replyToId?: string;
+    replyToText?: string;
+    replyToSender?: string;
 }
 
 export interface LocalConversation {
@@ -20,6 +24,9 @@ export interface LocalConversation {
     lastTimestamp: Date;
     unreadCount: number;
     secret?: string;
+    // Group Chat
+    isGroup?: boolean;
+    participants?: string[]; // Array of UUIDs
 }
 
 export interface Friend {
@@ -63,13 +70,10 @@ export class ChatDatabase extends Dexie {
             friends: 'uuid, username, isBlocked'
         });
 
-        // Version 4: Add friend status
-        this.version(4).stores({
-            friends: 'uuid, username, isBlocked, status'
-        }).upgrade(tx => {
-            return tx.table('friends').toCollection().modify(friend => {
-                if (!friend.status) friend.status = 'friend';
-            });
+        // Version 5: Group Chats & Replies
+        this.version(5).stores({
+            messages: '++id, msgId, from, to, timestamp, status, replyToId',
+            conversations: 'id, username, lastTimestamp, isGroup'
         });
     }
 }

@@ -9,6 +9,7 @@ interface ChatHeaderProps {
   themeAccent: string
   isDark: boolean
   fontSize: 'sm' | 'md' | 'lg'
+  isOnline?: boolean
   secret?: string
   onSecretChange: (secret: string) => void
 }
@@ -21,7 +22,7 @@ const themeColorMap: Record<string, { hover: string; hoverDark: string; icon: st
   'pink-500': { hover: 'hover:bg-pink-50', hoverDark: 'hover:bg-gray-700', icon: 'text-pink-600', iconDark: 'text-pink-400' },
 }
 
-export default function ChatHeader({ name, avatar, themeAccent, isDark, fontSize, secret, onSecretChange }: ChatHeaderProps) {
+export default function ChatHeader({ name, avatar, themeAccent, isDark, fontSize, isOnline, secret, onSecretChange }: ChatHeaderProps) {
   const [isEditingSecret, setIsEditingSecret] = useState(false)
   const [tempSecret, setTempSecret] = useState(secret || '')
 
@@ -39,14 +40,19 @@ export default function ChatHeader({ name, avatar, themeAccent, isDark, fontSize
     <div className={`${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} border-b px-6 py-4`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg font-medium ${isDark ? 'bg-gray-700' : 'bg-gray-200'}`}>
+          <div className={`relative w-10 h-10 rounded-full flex items-center justify-center text-lg font-medium ${isDark ? 'bg-gray-700' : 'bg-gray-200'}`}>
             {avatar}
+            {isOnline && (
+              <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-800 rounded-full" />
+            )}
           </div>
           <div>
             <h2 className={`${textSizeClass} font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{name}</h2>
             <div className="flex items-center gap-1">
-              <p className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>Active now</p>
-              <div className={`w-1 h-1 rounded-full ${secret ? 'bg-green-500' : 'bg-gray-400'}`} />
+              <p className={`text-[10px] font-bold ${isOnline ? 'text-green-500' : 'text-gray-500'}`}>
+                {isOnline ? 'Online' : 'Offline'}
+              </p>
+              <div className={`w-1 h-1 rounded-full ${secret ? 'bg-purple-500' : 'bg-gray-400'}`} />
               {secret && <span className="text-[10px] text-green-500 font-bold uppercase tracking-tighter">E2EE Locked</span>}
             </div>
           </div>

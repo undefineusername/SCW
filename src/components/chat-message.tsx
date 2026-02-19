@@ -7,15 +7,19 @@ interface Message {
   timestamp: Date
   status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed'
   isEcho?: boolean
+  replyToText?: string
+  replyToSender?: string
+  senderName?: string
 }
 
 interface ChatMessageProps {
   message: Message
   isDark: boolean
   fontSize: 'sm' | 'md' | 'lg'
+  onReply?: (message: Message) => void
 }
 
-export default function ChatMessage({ message, isDark, fontSize }: ChatMessageProps) {
+export default function ChatMessage({ message, isDark, fontSize, onReply }: ChatMessageProps) {
   const isUser = message.sender === 'user'
 
   const textSizeClass = fontSize === 'sm' ? 'text-sm' : fontSize === 'lg' ? 'text-lg' : 'text-base'
@@ -46,16 +50,31 @@ export default function ChatMessage({ message, isDark, fontSize }: ChatMessagePr
       <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-[75%]`}>
         {!isUser && (
           <span className={`text-[11px] font-semibold mb-1 ml-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-            Sender
+            {message.senderName || '상대방'}
           </span>
         )}
 
-        <div className={`flex items-end gap-1 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+        <div className={`group flex items-end gap-1 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
           <div className={`rounded-xl px-3 py-2 shadow-sm relative ${isUser ? userBg : `${otherBg} border`}`}>
+            {message.replyToText && (
+              <div className={`mb-1 p-2 rounded-lg text-[11px] border-l-2 ${isDark ? 'bg-black/20 border-gray-500 text-gray-400' : 'bg-black/5 border-gray-300 text-gray-500'} italic line-clamp-2`}>
+                <span className="font-bold block not-italic opacity-70 mb-0.5">{message.replyToSender === message.id ? '나' : (message.replyToSender || '상대방')}에게 답장</span>
+                {message.replyToText}
+              </div>
+            )}
             <p className={`${textSizeClass} break-words leading-snug`}>{message.text}</p>
           </div>
 
           <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} gap-1`}>
+            {onReply && (
+              <button
+                onClick={() => onReply(message)}
+                className={`opacity-0 group-hover:opacity-100 p-1 rounded-full transition-opacity ${isDark ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-500'}`}
+                title="Reply"
+              >
+                <motion.span whileTap={{ scale: 0.8 }}>↩️</motion.span>
+              </button>
+            )}
             {message.status !== 'read' && isUser && (
               <span className="text-[10px] font-bold text-[#FEE500] leading-none">1</span>
             )}

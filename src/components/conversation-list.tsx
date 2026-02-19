@@ -16,6 +16,7 @@ interface ConversationListProps {
   themeAccent: string
   isDark: boolean
   fontSize: 'sm' | 'md' | 'lg'
+  isOnline?: boolean
 }
 
 const themeColorMap: Record<string, { bg: string; border: string; dot: string; bgDark: string; borderDark: string }> = {
@@ -33,6 +34,7 @@ export default function ConversationList({
   themeAccent,
   isDark,
   fontSize,
+  isOnline,
 }: ConversationListProps) {
   const colors = themeColorMap[themeAccent] || themeColorMap['purple-500']
   const nameSizeClass = fontSize === 'sm' ? 'text-sm' : fontSize === 'lg' ? 'text-lg' : 'text-base'
@@ -52,8 +54,11 @@ export default function ConversationList({
         }`}
     >
       <div className="flex items-center gap-4">
-        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl font-medium flex-shrink-0 shadow-sm ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
+        <div className={`relative w-12 h-12 rounded-2xl flex items-center justify-center text-xl font-medium flex-shrink-0 shadow-sm ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
           {conversation.avatar}
+          {isOnline && (
+            <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-green-500 border-2 border-white dark:border-gray-900 rounded-full" />
+          )}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2 mb-0.5">

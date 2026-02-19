@@ -34,6 +34,7 @@ export default function App() {
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'friends' | 'chats' | 'settings'>('chats')
   const [inputValue, setInputValue] = useState('')
+  const [replyingTo, setReplyingTo] = useState<any | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(null);
@@ -106,12 +107,13 @@ export default function App() {
     setCurrentUser({ uuid, key, username, salt, kdfParams });
   };
 
-  const { isConnected, sendMessage } = useChat(
+  const { isConnected, sendMessage, presence } = useChat(
     currentUser,
     selectedConversation
   );
 
   const conversations = useLiveQuery(() => db.conversations.toArray()) || [];
+  const friends = useLiveQuery(() => db.friends.toArray()) || [];
   const messages = useLiveQuery(
     () => selectedConversation ? db.messages.where('from').equals(selectedConversation).or('to').equals(selectedConversation).sortBy('timestamp') : Promise.resolve([] as any[]),
     [selectedConversation]
@@ -127,8 +129,15 @@ export default function App() {
 
   const handleSendMessage = async () => {
     if (inputValue.trim() && selectedConversation) {
-      await sendMessage(selectedConversation, inputValue);
+      const replyMetadata = replyingTo ? {
+        id: replyingTo.id,
+        text: replyingTo.text,
+        sender: replyingTo.isEcho ? '나' : (conversations.find((c: any) => c.id === selectedConversation)?.username || '상대방')
+      } : undefined;
+
+      await sendMessage(selectedConversation, inputValue, replyMetadata);
       setInputValue('')
+      setReplyingTo(null)
     }
   }
 
@@ -289,6 +298,7 @@ export default function App() {
                   themeAccent={colors.accent}
                   isDark={isDark}
                   fontSize={fontSize}
+                  isOnline={presence[conversation.id] === 'online'}
                 />
               ))}
             </div>
@@ -340,6 +350,7 @@ export default function App() {
               fontSize={fontSize}
               secret={conversations.find((c: any) => c.id === selectedConversation)?.secret}
               onSecretChange={handleSecretChange}
+              isOnline={presence[selectedConversation] === 'online'}
             />
 
             {/* Messages */}
@@ -353,10 +364,14 @@ export default function App() {
                     sender: message.to === selectedConversation ? 'user' : 'other',
                     timestamp: message.timestamp,
                     status: message.status,
-                    isEcho: message.isEcho
+                    isEcho: message.isEcho,
+                    replyToText: message.replyToText,
+                    replyToSender: message.replyToSender,
+                    senderName: message.to === selectedConversation ? 'Me' : (friends.find((f: any) => f.uuid === message.from)?.username)
                   }}
                   isDark={isDark}
                   fontSize={fontSize}
+                  onReply={(msg) => setReplyingTo(msg)}
                 />
               ))}
               <div ref={messagesEndRef} />
@@ -364,6 +379,26 @@ export default function App() {
 
             {/* Input Area */}
             <div className={`p-5 border-t ${isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
+              {replyingTo && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`mb-3 p-3 rounded-xl border-l-4 flex items-center justify-between ${isDark ? 'bg-gray-700 border-purple-500' : 'bg-gray-50 border-purple-500'}`}
+                >
+                  <div className="flex-1 min-w-0 pr-4">
+                    <p className="text-[10px] font-bold text-purple-500 uppercase tracking-wider mb-0.5">답장하기</p>
+                    <p className={`text-xs truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                      {replyingTo.text}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setReplyingTo(null)}
+                    className={`p-1 rounded-full ${isDark ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-500'}`}
+                  >
+                    <Settings size={14} className="rotate-45" /> {/* Use X icon if available, using Settings rotated for now as Lucide X might not be imported */}
+                  </button>
+                </motion.div>
+              )}
               <div className="flex gap-2">
                 <input
                   type="text"

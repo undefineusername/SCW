@@ -20,6 +20,7 @@ export function useChat(
     selectedConversationUuid: string | null
 ) {
     const [isConnected, setIsConnected] = useState(false);
+    const [presence, setPresence] = useState<Record<string, 'online' | 'offline'>>({});
     const currentUserUuid = user?.uuid || null;
     const encryptionKey = user?.key || null;
 
@@ -144,19 +145,20 @@ export function useChat(
                         }
                     }
 
-                    // --- System Message Handler ---
+                    // --- Message Parsing (System or Normal) ---
+                    let msgText = text;
+                    let replyToData: { id?: string, text?: string, sender?: string } = {};
+
                     try {
-                        // Attempt to parse as JSON to check for system messages
                         if (text.startsWith('{') && text.endsWith('}')) {
                             const payload = JSON.parse(text);
+
+                            // 1. System Message Handler
                             if (payload.system === true && payload.type) {
                                 console.log(`⚙️ System Message Received: ${payload.type} from ${data.from}`);
 
                                 if (payload.type === 'FRIEND_REQUEST') {
-                                    // Received a Friend Request
                                     const existing = await db.friends.get(data.from);
-
-                                    // Extract Public Key for saving
                                     const senderJWK = senderPubRaw ? await crypto.subtle.exportKey(
                                         'jwk',
                                         await crypto.subtle.importKey(
@@ -173,37 +175,31 @@ export function useChat(
                                             dhPublicKey: senderJWK
                                         });
                                     } else if (existing.status === 'pending_outgoing') {
-                                        // Crossed requests - Auto accept
                                         await db.friends.update(data.from, { status: 'friend', dhPublicKey: senderJWK || existing.dhPublicKey });
-
-                                        // Auto-accept means we can form a conversation too? 
-                                        // Yes, if we crossed requests, we are effectively friends.
                                         if (newSharedSecret) {
                                             await db.conversations.put({
                                                 id: data.from,
                                                 username: existing.username,
                                                 avatar: '👤',
-                                                lastMessage: 'Friend Request Accepted', // System msg content
+                                                lastMessage: 'Friend Request Accepted',
                                                 lastTimestamp: new Date(),
                                                 unreadCount: 0,
                                                 secret: newSharedSecret
                                             });
                                         }
-                                    } else {
-                                        // Update key if existing friend request matches (e.g. re-sent)
-                                        if (senderJWK) await db.friends.update(data.from, { dhPublicKey: senderJWK });
+                                    } else if (senderJWK) {
+                                        await db.friends.update(data.from, { dhPublicKey: senderJWK });
                                     }
-                                    return; // Stop processing - don't add to messages
+                                    return;
                                 }
                                 else if (payload.type === 'FRIEND_ACCEPT') {
-                                    // Friend Request Accepted
+                                    const friendEntry = await db.friends.get(data.from);
+                                    const resolvedUsername = friendEntry?.username || payload.username || `User-${data.from.slice(0, 8)}`;
                                     await db.friends.update(data.from, { status: 'friend' });
-
-                                    // NOW we can save the conversation and secret
                                     if (newSharedSecret) {
                                         await db.conversations.put({
                                             id: data.from,
-                                            username: payload.username || `User-${data.from.slice(0, 8)}`,
+                                            username: resolvedUsername,
                                             avatar: '👤',
                                             lastMessage: 'Friend Request Accepted',
                                             lastTimestamp: new Date(),
@@ -214,25 +210,39 @@ export function useChat(
                                     return;
                                 }
                                 else if (payload.type === 'FRIEND_REJECT') {
-                                    // Friend Request Rejected - remove or ignore
                                     await db.friends.delete(data.from);
-                                    await db.conversations.delete(data.from); // Optional: delete conversation
+                                    await db.conversations.delete(data.from);
                                     return;
+                                }
+                            }
+
+                            // 2. Normal Wrapped Message (with replies/etc)
+                            if (payload.text !== undefined) {
+                                msgText = payload.text;
+                                replyToData = {
+                                    id: payload.replyToId,
+                                    text: payload.replyToText,
+                                    sender: payload.replyToSender
+                                };
+
+                                // Group Chat Routing
+                                if (payload.groupId) {
+                                    data.from = payload.groupId; // Route to group conversation
                                 }
                             }
                         }
                     } catch (e) {
-                        // Not a JSON system message, ignore and treat as text
-                        console.error("System message parse error", e);
+                        console.error("Payload parse error (assuming raw text):", e);
                     }
 
                     // --- Normal Message Handling ---
 
                     // If we have a new secret and it's a valid normal message, SAVE IT NOW
                     if (newSharedSecret) {
+                        const friendEntry = await db.friends.get(data.from);
                         await db.conversations.put({
                             id: data.from,
-                            username: `User-${data.from.slice(0, 8)}`, // Fallback name, usually exists
+                            username: friendEntry?.username || `User-${data.from.slice(0, 8)}`,
                             avatar: '👤',
                             lastMessage: '', // will update below
                             lastTimestamp: new Date(),
@@ -251,7 +261,10 @@ export function useChat(
                         msgId,
                         from: data.from,
                         to: data.to,
-                        text: text,
+                        text: msgText,
+                        replyToId: replyToData.id,
+                        replyToText: replyToData.text,
+                        replyToSender: replyToData.sender,
                         rawPayload: Array.from(fullPayload),
                         timestamp: new Date(data.timestamp),
                         status: (isEcho || isCurrentChat) ? 'read' : 'sent',
@@ -275,7 +288,7 @@ export function useChat(
                     const latestConv = await db.conversations.get(conversationId);
 
                     const convUpdate = {
-                        lastMessage: text,
+                        lastMessage: msgText,
                         lastTimestamp: new Date(data.timestamp),
                         unreadCount: (!isEcho && !isCurrentChat) ? (latestConv?.unreadCount || 0) + 1 : 0
                     };
@@ -284,9 +297,10 @@ export function useChat(
                         await db.conversations.update(conversationId, convUpdate);
                     } else if (!isEcho) {
                         // Should have been created above if secret existed, but fallback
+                        const friendEntry = await db.friends.get(conversationId);
                         await db.conversations.add({
                             id: conversationId,
-                            username: `User-${conversationId.slice(0, 8)}`,
+                            username: friendEntry?.username || `User-${conversationId.slice(0, 8)}`,
                             avatar: '👤',
                             ...convUpdate
                         });
@@ -338,6 +352,10 @@ export function useChat(
             socket.on('dispatch_status', onDispatchStatus);
             socket.on('msg_ack_push', onReadReceipts);
 
+            socket.on('presence_update', ({ uuid, status }: { uuid: string; status: 'online' | 'offline' }) => {
+                setPresence(prev => ({ ...prev, [uuid]: status }));
+            });
+
             // Cleanup
             return () => {
                 socket.off('connect', onConnect);
@@ -346,6 +364,7 @@ export function useChat(
                 socket.off('queue_flush', onQueueFlush);
                 socket.off('dispatch_status', onDispatchStatus);
                 socket.off('msg_ack_push', onReadReceipts);
+                socket.off('presence_update');
             };
         };
 
@@ -380,119 +399,119 @@ export function useChat(
         markAsRead();
     }, [selectedConversationUuid, currentUserUuid]);
 
-    const sendMessage = useCallback(async (toUuid: string, text: string) => {
+    // Presence Polling for selected conversation
+    useEffect(() => {
+        if (!selectedConversationUuid || !isConnected) return;
+
+        const socket = getSocket();
+
+        // Initial check
+        socket.emit('get_presence', selectedConversationUuid);
+
+        // Periodic check every 30s
+        const interval = setInterval(() => {
+            socket.emit('get_presence', selectedConversationUuid);
+        }, 30000);
+
+        return () => clearInterval(interval);
+    }, [selectedConversationUuid, isConnected]);
+
+    const sendMessage = useCallback(async (toUuid: string, text: string, replyTo?: { id: string, text: string, sender: string }) => {
         if (!currentUserUuid || !encryptionKey) return;
 
         const socket = getSocket();
         const msgId = crypto.randomUUID();
+        const timestamp = new Date().toISOString();
 
         try {
-            // Find active key for encryption
-            let activeKey = encryptionKey;
-
-            // Checks for Conversation Secret (Shared Key)
             const conv = await db.conversations.get(toUuid);
-            if (conv?.secret) {
-                activeKey = await deriveKeyFromSecret(conv.secret);
-            } else {
-                // If no secret, try to find in Friends list and DERIVE it now?
-                // Or we can rely on protocol: Send my key, let them derive.
-                // BUT I need a key to encrypt FOR THEM.
-                // If I don't have their secret, I MUST use their Public Key to derive it first.
-                // But I can only derive if I know their public key.
-                const friend = await db.friends.get(toUuid);
-                if (friend?.dhPublicKey) {
-                    // We have their Public Key! Derive secret now.
+            if (!conv) return;
+
+            const isGroup = conv.isGroup && conv.participants;
+            const participants = isGroup ? conv.participants! : [toUuid];
+
+            // Pack JSON payload
+            const payloadData: any = {
+                text,
+                timestamp,
+                groupId: isGroup ? toUuid : undefined
+            };
+
+            if (replyTo) {
+                payloadData.replyToId = replyTo.id;
+                payloadData.replyToText = replyTo.text;
+                payloadData.replyToSender = replyTo.sender;
+            }
+
+            const jsonPayload = JSON.stringify(payloadData);
+
+            // Fan-out: Encrypt and send to each participant
+            for (const participantUuid of participants) {
+                try {
+                    let activeKey = encryptionKey;
+                    const pConv = await db.conversations.get(participantUuid);
+
+                    if (pConv?.secret) {
+                        activeKey = await deriveKeyFromSecret(pConv.secret);
+                    } else {
+                        const friend = await db.friends.get(participantUuid);
+                        if (friend?.dhPublicKey) {
+                            const account = await db.accounts.get(currentUserUuid);
+                            if (account?.dhPrivateKey) {
+                                const sharedSecretStr = await deriveSharedSecret(account.dhPrivateKey, friend.dhPublicKey);
+                                await db.conversations.update(participantUuid, { secret: sharedSecretStr });
+                                activeKey = await deriveKeyFromSecret(sharedSecretStr);
+                            }
+                        }
+                    }
+
+                    const encryptedData = await encryptMessage(jsonPayload, activeKey);
+
+                    // Attach My Public Key
+                    let finalPayload = encryptedData;
                     const account = await db.accounts.get(currentUserUuid);
-                    if (account?.dhPrivateKey) {
-                        const sharedSecretStr = await deriveSharedSecret(account.dhPrivateKey, friend.dhPublicKey);
-
-                        // Save it
-                        await db.conversations.update(toUuid, { secret: sharedSecretStr });
-                        activeKey = await deriveKeyFromSecret(sharedSecretStr);
+                    if (account?.dhPublicKey) {
+                        const myRawPub = await exportPublicKeyToRaw(account.dhPublicKey);
+                        if (myRawPub.byteLength === 97) {
+                            const packet = new Uint8Array(1 + myRawPub.byteLength + encryptedData.byteLength);
+                            packet[0] = myRawPub.byteLength;
+                            packet.set(myRawPub, 1);
+                            packet.set(encryptedData, 1 + myRawPub.byteLength);
+                            finalPayload = packet;
+                        }
                     }
-                } else {
-                    console.warn("⚠️ No Shared Secret and No Public Key for recipient. Falling back to encryptionKey (insecure/legacy).");
-                    // In real E2EE, we should block this or fetch key from server.
-                    // But for robustness:
+
+                    socket.emit('relay', { to: participantUuid, payload: Array.from(finalPayload), msgId });
+                } catch (err) {
+                    console.error(`Failed to send to participant ${participantUuid}:`, err);
                 }
             }
 
-            const encryptedData = await encryptMessage(text, activeKey);
-
-            // --- Ultra Legend Protocol: Packing ---
-            // [97 (len)][MyRawKey (97)][EncryptedData]
-
-            let finalPayload = encryptedData;
-
-            // Get My Public Key to attach
-            const account = await db.accounts.get(currentUserUuid);
-            if (account?.dhPublicKey) {
-                const myRawPub = await exportPublicKeyToRaw(account.dhPublicKey);
-                if (myRawPub.byteLength === 97) {
-                    const packet = new Uint8Array(1 + myRawPub.byteLength + encryptedData.byteLength);
-                    packet[0] = myRawPub.byteLength;
-                    packet.set(myRawPub, 1);
-                    packet.set(encryptedData, 1 + myRawPub.byteLength);
-                    finalPayload = packet;
-                }
-            } else {
-                // Fallback to sending just encrypted (will fail new parser check, fall to legacy)
-            }
-
-            // Convert Uint8Array to regular array
-            const payloadArray = Array.from(finalPayload);
-
-            // Check if it is a system message to avoid saving to DB
-            let isSystemMessage = false;
-            try {
-                if (text.startsWith('{') && text.endsWith('}')) {
-                    const payload = JSON.parse(text);
-                    if (payload.system === true && payload.type && (payload.type.startsWith('FRIEND_'))) {
-                        isSystemMessage = true;
-                    }
-                }
-            } catch (e) { }
-
-            // Save to local DB first (optimistic) - ONLY if NOT system message
-            if (!isSystemMessage) {
-                await db.messages.add({
-                    msgId,
-                    from: currentUserUuid,
-                    to: toUuid,
-                    text,
-                    rawPayload: payloadArray,
-                    timestamp: new Date(),
-                    status: 'sending'
-                });
-
-                // Update conversation
-                const existingConv = await db.conversations.get(toUuid);
-                if (existingConv) {
-                    await db.conversations.update(toUuid, {
-                        lastMessage: text,
-                        lastTimestamp: new Date()
-                    });
-                }
-            } else {
-                console.log(`📤 Sending System Message: ${text}`);
-            }
-
-            // Send to relay using relay protocol
-            socket.emit('relay', {
+            // Save ONE local message for the conversation (Group or 1:1)
+            await db.messages.add({
+                msgId,
+                from: currentUserUuid,
                 to: toUuid,
-                payload: payloadArray,
-                msgId
+                text,
+                replyToId: replyTo?.id,
+                replyToText: replyTo?.text,
+                replyToSender: replyTo?.sender,
+                timestamp: new Date(),
+                status: 'sending'
+            });
+
+            await db.conversations.update(toUuid, {
+                lastMessage: text,
+                lastTimestamp: new Date()
             });
 
             return msgId;
         } catch (err) {
             console.error('Send message failed:', err);
-            // Mark as failed
             await db.messages.where('msgId').equals(msgId).modify({ status: 'failed' });
         }
     }, [currentUserUuid, encryptionKey]);
 
-    return { isConnected, conversations, sendMessage };
+    return { isConnected, conversations, sendMessage, presence };
 }
 

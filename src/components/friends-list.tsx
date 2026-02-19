@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Search, Check, X, UserPlus, Clock } from 'lucide-react';
+import { Search, Check, X, UserPlus, Clock, Edit2, CheckCircle2, Users } from 'lucide-react';
 import { db } from '@/lib/db';
 import { getSocket } from '@/lib/socket';
 import { useLiveQuery } from 'dexie-react-hooks';
 import AddFriendModal from './add-friend-modal';
+import CreateGroupModal from './create-group-modal';
 
 interface FriendsListProps {
     isDark: boolean;
@@ -17,11 +18,13 @@ interface FriendsListProps {
 export default function FriendsList({ isDark, currentUser, onNewChat, sendMessage, pendingInviteCode, onClearInvite }: FriendsListProps) {
     const friends = useLiveQuery(() => db.friends.toArray()) || [];
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+    const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
+    const [editingUuid, setEditingUuid] = useState<string | null>(null);
+    const [editName, setEditName] = useState('');
 
     useEffect(() => {
         if (pendingInviteCode && onClearInvite) {
             console.log("🔗 Processing Invite Code:", pendingInviteCode);
-            // Small delay to ensure socket is ready? Usually okay.
             handleAddFriendSubmit(pendingInviteCode);
             onClearInvite();
         }
@@ -51,16 +54,14 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
         }
 
         if (confirm(`User found: ${username}\nID: ${data.uuid}\n\nSend friend request?`)) {
-            // 1. Add to pending outgoing
             await db.friends.put({
                 uuid: data.uuid,
                 username: username,
                 isBlocked: false,
-                dhPublicKey: data.publicKey, // Save the Public Key if available
+                dhPublicKey: data.publicKey,
                 status: 'pending_outgoing'
             });
 
-            // 2. Send Request Message
             await sendMessage(data.uuid, JSON.stringify({
                 system: true,
                 type: 'FRIEND_REQUEST',
@@ -74,44 +75,26 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
 
     const handleAddFriendSubmit = (input: string) => {
         const socket = getSocket();
-
-        // Setup temporary listeners for this specific request
-        // NOTE: In a real app, move these to a permanent useEffect to avoid duplicate listeners or memory leaks
-        // But for simplicity in this flow, using .once() is okay if we are careful.
-
-        // HEURISTIC: If input is exactly 6 alphanumeric chars, try Code Resolution first.
-        // Otherwise, assume Username.
         const isCode = /^[a-zA-Z0-9]{6}$/.test(input);
 
         if (isCode) {
-            console.log("🔍 Trying to resolve invite code:", input);
             socket.emit('resolve_invite_code', input);
-
             socket.once('invite_code_resolved', (data: any) => {
                 handleFoundUser(data);
-                // Clean up other listener
                 socket.off('invite_code_error');
             });
-
             socket.once('invite_code_error', (err: { message: string }) => {
-                // If code fails, maybe it was a short username? Fallback to get_salt?
-                // But generally 6-char codes are distinct. 
-                // Let's just alert error.
                 alert(`Invite Code Error: ${err.message}`);
                 socket.off('invite_code_resolved');
             });
         } else {
-            console.log("🔍 Searching by username:", input);
             socket.emit('get_salt', input);
-
             socket.once('salt_found', (data: any) => {
                 handleFoundUser({ ...data, username: input });
                 socket.off('salt_not_found');
             });
-
             socket.once('salt_not_found', () => {
-                // Try as raw UUID?
-                if (input.length > 20) { // Simple check for UUID-like length
+                if (input.length > 20) {
                     if (confirm(`User not found by name. Is '${input}' a UUID? Try adding directly?`)) {
                         handleFoundUser({ uuid: input, username: `User-${input.slice(0, 5)}...` });
                     }
@@ -123,7 +106,6 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
         }
     };
 
-
     const handleAccept = async (uuid: string, username: string) => {
         await db.friends.update(uuid, { status: 'friend' });
         await sendMessage(uuid, JSON.stringify({
@@ -131,7 +113,7 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
             type: 'FRIEND_ACCEPT',
             username: currentUser.username
         }));
-        // Create conversation entry
+
         const exists = await db.conversations.get(uuid);
         if (!exists) {
             await db.conversations.add({
@@ -156,26 +138,77 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
         }
     };
 
+    const startEditing = (e: React.MouseEvent, uuid: string, currentName: string) => {
+        e.stopPropagation();
+        setEditingUuid(uuid);
+        setEditName(currentName);
+    };
+
+    const saveRename = async (e: React.MouseEvent | React.FormEvent, uuid: string) => {
+        e.stopPropagation();
+        if (editName.trim()) {
+            await db.friends.update(uuid, { username: editName.trim() });
+            const conv = await db.conversations.get(uuid);
+            if (conv) {
+                await db.conversations.update(uuid, { username: editName.trim() });
+            }
+        }
+        setEditingUuid(null);
+    };
+
+    const handleCreateGroup = async (name: string, participants: string[]) => {
+        const groupId = `group_${crypto.randomUUID()}`;
+
+        await db.conversations.add({
+            id: groupId,
+            username: name,
+            avatar: '👥',
+            lastMessage: 'Group created',
+            lastTimestamp: new Date(),
+            unreadCount: 0,
+            isGroup: true,
+            participants: participants // should include participants' UUIDs
+        });
+
+        onNewChat(groupId);
+    };
+
     return (
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full overflow-hidden">
             <AddFriendModal
                 isOpen={isAddModalOpen}
                 onClose={() => setIsAddModalOpen(false)}
                 onAddFriend={handleAddFriendSubmit}
                 isDark={isDark}
             />
+            <CreateGroupModal
+                isOpen={isGroupModalOpen}
+                onClose={() => setIsGroupModalOpen(false)}
+                isDark={isDark}
+                onCreateGroup={handleCreateGroup}
+            />
 
-            <div className="p-5 flex items-center justify-between">
+            <div className="p-5 flex items-center justify-between flex-shrink-0">
                 <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Friends</h2>
-                <button
-                    onClick={() => setIsAddModalOpen(true)}
-                    className={`p-2 rounded-lg ${isDark ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-600'}`}
-                >
-                    <UserPlus size={20} />
-                </button>
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => setIsGroupModalOpen(true)}
+                        className={`p-2 rounded-lg ${isDark ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-600'}`}
+                        title="New Group Chat"
+                    >
+                        <Users size={20} />
+                    </button>
+                    <button
+                        onClick={() => setIsAddModalOpen(true)}
+                        className={`p-2 rounded-lg ${isDark ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-600'}`}
+                        title="Add Friend"
+                    >
+                        <UserPlus size={20} />
+                    </button>
+                </div>
             </div>
 
-            <div className="px-5 mb-4">
+            <div className="px-5 mb-4 flex-shrink-0">
                 <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-gray-100'}`}>
                     <Search size={16} className="text-gray-400" />
                     <input
@@ -186,8 +219,7 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto">
-                {/* Current User Profile Item */}
+            <div className="flex-1 overflow-y-auto pb-6">
                 <div className="px-5 py-5">
                     <div className="flex items-center gap-4">
                         <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-sm ${isDark ? 'bg-gray-800' : 'bg-white border border-gray-100'}`}>
@@ -211,7 +243,6 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
 
                 <div className="mx-5 h-px bg-gray-100 dark:bg-gray-800 mb-4" />
 
-                {/* Friend Requests Section */}
                 {incomingRequests.length > 0 && (
                     <div className="px-5 mb-6">
                         <div className="flex items-center justify-between mb-2">
@@ -250,7 +281,6 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
                     </div>
                 )}
 
-                {/* Outgoing Requests Section (Optional but good) */}
                 {outgoingRequests.length > 0 && (
                     <div className="px-5 mb-6">
                         <div className="flex items-center justify-between mb-2">
@@ -285,19 +315,44 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
                             </p>
                         ) : (
                             activeFriends.map(friend => (
-                                <button
+                                <div
                                     key={friend.uuid}
+                                    className={`group flex items-center gap-3 p-2 rounded-xl transition-colors ${isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-100'} cursor-pointer`}
                                     onClick={() => onNewChat(friend.uuid)}
-                                    className={`w-full flex items-center gap-3 p-2 rounded-xl transition-colors ${isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-100'}`}
                                 >
-                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${isDark ? 'bg-gray-700' : 'bg-gray-200'}`}>
+                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0 ${isDark ? 'bg-gray-700' : 'bg-gray-200'}`}>
                                         {friend.avatar || '👤'}
                                     </div>
-                                    <div className="text-left">
-                                        <p className={`text-sm font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{friend.username}</p>
-                                        <p className="text-[9px] text-gray-500 font-mono opacity-60 truncate max-w-[120px]">{friend.uuid}</p>
+                                    <div className="flex-1 min-w-0">
+                                        {editingUuid === friend.uuid ? (
+                                            <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                                                <input
+                                                    autoFocus
+                                                    className={`text-sm font-bold bg-transparent border-b border-purple-500 outline-none w-full ${isDark ? 'text-white' : 'text-gray-900'}`}
+                                                    value={editName}
+                                                    onChange={e => setEditName(e.target.value)}
+                                                    onKeyDown={e => e.key === 'Enter' && saveRename(e as any, friend.uuid)}
+                                                />
+                                                <button onClick={e => saveRename(e, friend.uuid)} className="text-green-500">
+                                                    <CheckCircle2 size={16} />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center justify-between">
+                                                <div className="min-w-0">
+                                                    <p className={`text-sm font-bold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{friend.username}</p>
+                                                    <p className="text-[9px] text-gray-500 font-mono opacity-60 truncate max-w-[150px]">{friend.uuid}</p>
+                                                </div>
+                                                <button
+                                                    onClick={e => startEditing(e, friend.uuid, friend.username)}
+                                                    className={`p-1.5 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg ${isDark ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-200 text-gray-500'}`}
+                                                >
+                                                    <Edit2 size={14} />
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
-                                </button>
+                                </div>
                             ))
                         )}
                     </div>
