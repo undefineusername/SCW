@@ -234,7 +234,7 @@ export function useChat(
                                     } else if (senderJWK) {
                                         await db.friends.update(data.from, { dhPublicKey: senderJWK });
                                     }
-                                    return;
+                                    // Fall through to save message
                                 }
                                 else if (payload.type === 'FRIEND_ACCEPT') {
                                     const friendEntry = await db.friends.get(data.from);
@@ -251,7 +251,7 @@ export function useChat(
                                             secret: newSharedSecret
                                         });
                                     }
-                                    return;
+                                    // Fall through
                                 }
                                 else if (payload.type === 'FRIEND_REJECT') {
                                     await db.friends.delete(data.from);

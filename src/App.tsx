@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Settings, LogOut, Lock as LockIcon } from 'lucide-react'
+import { Send, Settings, LogOut, Lock as LockIcon, UserPlus, ShieldAlert } from 'lucide-react'
 import ChatMessage from '@/components/chat-message'
 import ConversationList from '@/components/conversation-list'
 import ChatHeader from '@/components/chat-header'
@@ -229,6 +229,38 @@ export default function App() {
     }
   }
 
+  const handleAcceptFriend = async (uuid: string) => {
+    const friend = await db.friends.get(uuid);
+    const username = friend?.username || conversations.find((c: any) => c.id === uuid)?.username || 'Unknown';
+
+    await db.friends.put({
+      uuid,
+      username,
+      status: 'friend',
+      isBlocked: false
+    });
+
+    await sendMessage(uuid, JSON.stringify({
+      system: true,
+      type: 'FRIEND_ACCEPT',
+      username: currentUser?.username
+    }));
+  };
+
+  const handleBlockUser = async (uuid: string) => {
+    if (confirm('Block this user? You will no longer see their messages.')) {
+      const friend = await db.friends.get(uuid);
+      await db.friends.put({
+        uuid,
+        username: friend?.username || 'Stranger',
+        status: 'blocked',
+        isBlocked: true
+      });
+      await db.conversations.delete(uuid);
+      setSelectedConversation(null);
+    }
+  };
+
   const colors = themeColors[theme]
   const fontSizeClass = { sm: 'text-sm', md: 'text-base', lg: 'text-lg' }[fontSize]
   const fontClass = fontFamily === 'serif' ? 'font-serif' : 'font-sans'
@@ -341,6 +373,49 @@ export default function App() {
       <div className={`flex-1 flex flex-col ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
         {selectedConversation ? (
           <>
+            {/* Stranger Banner (O/X) */}
+            {(() => {
+              const isFriend = friends.find((f: any) => f.uuid === selectedConversation)?.status === 'friend';
+              const isGroup = conversations.find((c: any) => c.id === selectedConversation)?.isGroup;
+
+              if (selectedConversation && !isFriend && !isGroup) {
+                return (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    className={`px-6 py-3 border-b flex items-center justify-between z-10 ${isDark ? 'bg-gray-900/80 border-gray-700' : 'bg-blue-50/80 border-blue-100'} backdrop-blur-md`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-full ${isDark ? 'bg-gray-800' : 'bg-white shadow-sm'}`}>
+                        <ShieldAlert size={18} className="text-blue-500" />
+                      </div>
+                      <div>
+                        <p className={`text-xs font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Unknown Contact</p>
+                        <p className={`text-[10px] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Choose how to handle this chatter.</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleAcceptFriend(selectedConversation)}
+                        className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-500/20`}
+                      >
+                        <UserPlus size={14} />
+                        Add Friend (O)
+                      </button>
+                      <button
+                        onClick={() => handleBlockUser(selectedConversation)}
+                        className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${isDark ? 'bg-gray-800 text-gray-400 hover:text-red-400' : 'bg-white text-gray-500 hover:text-red-500 border border-gray-200'}`}
+                      >
+                        <ShieldAlert size={14} />
+                        Block (X)
+                      </button>
+                    </div>
+                  </motion.div>
+                );
+              }
+              return null;
+            })()}
+
             {/* Chat Header */}
             <ChatHeader
               name={conversations.find((c: any) => c.id === selectedConversation)?.username || 'Chat'}

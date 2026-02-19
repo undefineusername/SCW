@@ -38,7 +38,7 @@ export interface Friend {
     statusMessage?: string;
     isBlocked: boolean;
     dhPublicKey?: JsonWebKey;
-    status?: 'friend' | 'pending_incoming' | 'pending_outgoing';
+    status?: 'friend' | 'pending_incoming' | 'pending_outgoing' | 'blocked';
 }
 
 export interface UserAccount {

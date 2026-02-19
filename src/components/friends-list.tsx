@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Check, X, UserPlus, Clock, Edit2, CheckCircle2, Users } from 'lucide-react';
+import { Search, Edit2, CheckCircle2, Users, UserPlus } from 'lucide-react';
 import { db } from '@/lib/db';
 import { getSocket } from '@/lib/socket';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -31,8 +31,6 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
     }, [pendingInviteCode]);
 
     const activeFriends = friends.filter(f => !f.status || f.status === 'friend');
-    const incomingRequests = friends.filter(f => f.status === 'pending_incoming');
-    const outgoingRequests = friends.filter(f => f.status === 'pending_outgoing');
 
     const handleFoundUser = async (data: { uuid: string; username?: string; publicKey?: any }) => {
         const username = data.username || `User-${data.uuid.slice(0, 8)}`; // Fallback
@@ -127,16 +125,6 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
         }
     };
 
-    const handleReject = async (uuid: string) => {
-        if (confirm('Reject this friend request?')) {
-            await db.friends.delete(uuid);
-            await sendMessage(uuid, JSON.stringify({
-                system: true,
-                type: 'FRIEND_REJECT',
-                username: currentUser.username
-            }));
-        }
-    };
 
     const startEditing = (e: React.MouseEvent, uuid: string, currentName: string) => {
         e.stopPropagation();
@@ -243,65 +231,7 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
 
                 <div className="mx-5 h-px bg-gray-100 dark:bg-gray-800 mb-4" />
 
-                {incomingRequests.length > 0 && (
-                    <div className="px-5 mb-6">
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="text-[11px] font-bold text-blue-500 uppercase tracking-widest">Requests</span>
-                            <span className="text-[11px] font-bold text-blue-500">{incomingRequests.length}</span>
-                        </div>
-                        <div className="space-y-2">
-                            {incomingRequests.map(req => (
-                                <div key={req.uuid} className={`p-3 rounded-xl flex items-center justify-between ${isDark ? 'bg-gray-800/50' : 'bg-blue-50'}`}>
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${isDark ? 'bg-gray-700' : 'bg-white'}`}>
-                                            👤
-                                        </div>
-                                        <div>
-                                            <p className={`text-sm font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{req.username}</p>
-                                            <p className="text-[9px] text-gray-500">Wants to be friends</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <button
-                                            onClick={() => handleAccept(req.uuid, req.username)}
-                                            className="p-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-                                        >
-                                            <Check size={14} />
-                                        </button>
-                                        <button
-                                            onClick={() => handleReject(req.uuid)}
-                                            className={`p-1.5 ${isDark ? 'bg-gray-700 hover:bg-gray-600' : 'bg-white hover:bg-gray-200'} text-gray-500 rounded-lg transition-colors`}
-                                        >
-                                            <X size={14} />
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {outgoingRequests.length > 0 && (
-                    <div className="px-5 mb-6">
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">Sent</span>
-                            <span className="text-[11px] font-bold text-gray-400">{outgoingRequests.length}</span>
-                        </div>
-                        <div className="space-y-1">
-                            {outgoingRequests.map(req => (
-                                <div key={req.uuid} className={`p-2 px-3 rounded-xl flex items-center justify-between opacity-70 ${isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-50'}`}>
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs ${isDark ? 'bg-gray-800' : 'bg-gray-200'}`}>
-                                            <Clock size={12} />
-                                        </div>
-                                        <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>{req.username}</span>
-                                    </div>
-                                    <span className="text-[9px] text-gray-400">Pending</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
+                <div className="mx-5 h-px bg-gray-100 dark:bg-gray-800 mb-4" />
 
                 <div className="px-5">
                     <div className="flex items-center justify-between mb-4">
