@@ -155,7 +155,7 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
             lastTimestamp: new Date(),
             unreadCount: 0,
             isGroup: true,
-            participants: participants // should include participants' UUIDs
+            participants: [...participants, currentUser.uuid]
         });
 
         onNewChat(groupId);

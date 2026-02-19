@@ -349,26 +349,52 @@ export function useChat(
                     }
 
                     // Update conversation list
-                    // Re-fetch conversation to ensure we have latest state (including secret if just saved)
                     const latestConv = await db.conversations.get(conversationId);
-
-                    const convUpdate = {
+                    const convUpdate: any = {
                         lastMessage: msgText,
                         lastTimestamp: new Date(data.timestamp),
                         unreadCount: (!isEcho && !isCurrentChat) ? (latestConv?.unreadCount || 0) + 1 : 0
                     };
 
+                    // If it's a group, we might have name/participants in the payload
+                    let payloadGroupName = null;
+                    let payloadParticipants = null;
+                    try {
+                        const p = JSON.parse(text);
+                        payloadGroupName = p.groupName;
+                        payloadParticipants = p.participants;
+                    } catch (e) { }
+
                     if (latestConv) {
+                        // Update existing
+                        if (msgGroupId) {
+                            convUpdate.isGroup = true;
+                            if (payloadParticipants) convUpdate.participants = payloadParticipants;
+                            if (payloadGroupName) convUpdate.username = payloadGroupName;
+                        }
                         await db.conversations.update(conversationId, convUpdate);
                     } else if (!isEcho) {
-                        // Should have been created above if secret existed, but fallback
-                        const friendEntry = await db.friends.get(conversationId);
-                        await db.conversations.add({
-                            id: conversationId,
-                            username: friendEntry?.username || `User-${conversationId.slice(0, 8)}`,
-                            avatar: '👤',
-                            ...convUpdate
-                        });
+                        if (msgGroupId) {
+                            // Create NEW Group Conversation
+                            await db.conversations.add({
+                                id: conversationId,
+                                username: payloadGroupName || `Group-${conversationId.slice(6, 14)}`,
+                                avatar: '👥',
+                                isGroup: true,
+                                participants: payloadParticipants || [],
+                                ...convUpdate
+                            });
+                            console.log("👥 New Group Conversation Created:", conversationId);
+                        } else {
+                            // Create NEW 1:1 Conversation
+                            const friendEntry = await db.friends.get(conversationId);
+                            await db.conversations.add({
+                                id: conversationId,
+                                username: friendEntry?.username || `User-${conversationId.slice(0, 8)}`,
+                                avatar: '👤',
+                                ...convUpdate
+                            });
+                        }
                     }
                 } catch (err) {
                     console.error('Failed to decrypt or save incoming message:', err);
@@ -512,7 +538,9 @@ export function useChat(
                 const payloadData: any = {
                     text,
                     timestamp,
-                    groupId: isGroup ? toUuid : undefined
+                    groupId: isGroup ? toUuid : undefined,
+                    groupName: isGroup ? conv?.username : undefined,
+                    participants: isGroup ? participants : undefined
                 };
 
                 if (replyTo) {
@@ -525,6 +553,7 @@ export function useChat(
 
             // Fan-out: Encrypt and send to each participant
             for (const participantUuid of participants) {
+                if (participantUuid === currentUserUuid) continue;
                 try {
                     let activeKey = encryptionKey;
                     const pConv = await db.conversations.get(participantUuid);

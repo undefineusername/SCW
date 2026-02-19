@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
-import { Send, Settings, LogOut, Lock as LockIcon, UserPlus, ShieldAlert } from 'lucide-react'
-import ChatMessage from '@/components/chat-message'
+import { useState, useRef, useEffect, useMemo } from 'react'
+import { Send, Settings, LogOut, Lock as LockIcon, UserPlus, ShieldAlert, X as XIcon } from 'lucide-react'
+import ChatMessage, { DateDivider } from '@/components/chat-message'
 import ConversationList from '@/components/conversation-list'
 import ChatHeader from '@/components/chat-header'
 import SettingsModal from '@/components/settings-modal'
@@ -118,6 +118,43 @@ export default function App() {
     () => selectedConversation ? db.messages.where('from').equals(selectedConversation).or('to').equals(selectedConversation).or('groupId').equals(selectedConversation).sortBy('timestamp') : Promise.resolve([] as any[]),
     [selectedConversation]
   ) || [] as any[];
+
+  // ── useMemo: 날짜 구분선 삽입 + 연속 메시지 그룹핑 ──────────────────
+  const processedMessages = useMemo(() => {
+    if (!messages.length) return [];
+
+    const result: any[] = [];
+    let lastDateStr = ''
+    let lastSender = ''
+
+    messages.forEach((msg: any, idx: number) => {
+      const ts: Date = msg.timestamp instanceof Date ? msg.timestamp : new Date(msg.timestamp)
+      const dateStr = ts.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })
+      const minuteStr = `${msg.from || msg.to}_${ts.getFullYear()}-${ts.getMonth()}-${ts.getDate()}_${ts.getHours()}-${ts.getMinutes()}`
+
+      // 날짜 구분선
+      if (dateStr !== lastDateStr) {
+        result.push({ type: 'date', date: dateStr, id: `date-${dateStr}` })
+        lastDateStr = dateStr
+        lastSender = ''
+      }
+
+      const nextMsg = messages[idx + 1]
+      const nextTs = nextMsg ? (nextMsg.timestamp instanceof Date ? nextMsg.timestamp : new Date(nextMsg.timestamp)) : null
+      const nextMinuteStr = nextMsg ? `${nextMsg.from || nextMsg.to}_${nextTs!.getFullYear()}-${nextTs!.getMonth()}-${nextTs!.getDate()}_${nextTs!.getHours()}-${nextTs!.getMinutes()}` : ''
+      const nextSender = nextMsg?.from
+
+      const isContinuation = msg.from === lastSender
+      const isFirst = !isContinuation
+      const isLast = nextSender !== msg.from || nextMinuteStr !== minuteStr
+
+      result.push({ ...msg, _isFirst: isFirst, _isLast: isLast, _showUnread: isLast })
+
+      lastSender = msg.from
+    })
+
+    return result
+  }, [messages])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -318,10 +355,17 @@ export default function App() {
                   <p className={`text-sm ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>No active pipelines</p>
                 </div>
               )}
-              {conversations.sort((a: any, b: any) => b.lastTimestamp - a.lastTimestamp).map((conversation: any) => (
+              {conversations.sort((a: any, b: any) => {
+                const ta = a.lastTimestamp instanceof Date ? a.lastTimestamp.getTime() : new Date(a.lastTimestamp).getTime()
+                const tb = b.lastTimestamp instanceof Date ? b.lastTimestamp.getTime() : new Date(b.lastTimestamp).getTime()
+                return tb - ta
+              }).map((conversation: any) => (
                 <ConversationList
                   key={conversation.id}
-                  conversation={conversation}
+                  conversation={{
+                    ...conversation,
+                    lastTimestamp: conversation.lastTimestamp instanceof Date ? conversation.lastTimestamp : new Date(conversation.lastTimestamp)
+                  }}
                   isSelected={selectedConversation === conversation.id}
                   onSelect={() => {
                     setSelectedConversation(conversation.id);
@@ -383,6 +427,8 @@ export default function App() {
               secret={conversations.find((c: any) => c.id === selectedConversation)?.secret}
               onSecretChange={handleSecretChange}
               isOnline={presence[selectedConversation] === 'online'}
+              isGroup={conversations.find((c: any) => c.id === selectedConversation)?.isGroup}
+              participants={(conversations.find((c: any) => c.id === selectedConversation)?.participants || []) as any[]}
             />
 
             {/* Stranger Banner (O/X) */}
@@ -433,39 +479,58 @@ export default function App() {
             })()}
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-2 bg-[url('/chat-bg.png')] bg-repeat bg-fixed opacity-95">
-              {messages.map((message: any) => (
-                <ChatMessage
-                  key={message.msgId || message.id}
-                  message={{
-                    id: message.msgId,
-                    text: message.text,
-                    sender: message.to === selectedConversation ? 'user' : 'other',
-                    timestamp: message.timestamp,
-                    status: message.status,
-                    isEcho: message.isEcho,
-                    replyToText: message.replyToText,
-                    replyToSender: message.replyToSender,
-                    senderName: message.to === selectedConversation ? 'Me' : (friends.find((f: any) => f.uuid === message.from)?.username)
-                  }}
-                  isDark={isDark}
-                  fontSize={fontSize}
-                  onReply={(msg) => setReplyingTo(msg)}
-                />
-              ))}
+            <div className={`flex-1 overflow-y-auto py-3 ${isDark ? 'bg-gray-900' : 'bg-[#B2C7D9]'}`}>
+              {processedMessages.map((item: any) => {
+                // 날짜 구분선
+                if (item.type === 'date') {
+                  return <DateDivider key={item.id} date={item.date} isDark={isDark} />
+                }
+
+                const conv = conversations.find((c: any) => c.id === selectedConversation)
+                const isGroupChat = conv?.isGroup
+                const isMyMsg = item.isEcho || item.from === currentUser?.uuid
+                const senderFriend = friends.find((f: any) => f.uuid === item.from)
+
+                return (
+                  <ChatMessage
+                    key={item.msgId || item.id}
+                    message={{
+                      id: item.msgId,
+                      text: item.text,
+                      sender: isMyMsg ? 'user' : 'other',
+                      timestamp: item.timestamp instanceof Date ? item.timestamp : new Date(item.timestamp),
+                      status: item.status,
+                      isEcho: item.isEcho,
+                      replyToText: item.replyToText,
+                      replyToSender: item.replyToSender,
+                      senderName: isMyMsg ? '나' : (senderFriend?.username || (item.from ? `User-${item.from.slice(0, 4)}` : '상대방')),
+                      senderAvatar: isMyMsg ? '' : (senderFriend?.avatar || '👤'),
+                      type: item.type === 'system' ? 'system' : 'text',
+                    }}
+                    isDark={isDark}
+                    fontSize={fontSize}
+                    onReply={(msg) => setReplyingTo(msg)}
+                    isGroup={isGroupChat}
+                    isFirstInGroup={item._isFirst}
+                    isLastInGroup={item._isLast}
+                    showTime={item._isLast}
+                    showUnread={item._showUnread}
+                  />
+                )
+              })}
               <div ref={messagesEndRef} />
             </div>
 
             {/* Input Area */}
-            <div className={`p-5 border-t ${isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
+            <div className={`px-3 py-3 border-t ${isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
               {replyingTo && (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className={`mb-3 p-3 rounded-xl border-l-4 flex items-center justify-between ${isDark ? 'bg-gray-700 border-purple-500' : 'bg-gray-50 border-purple-500'}`}
+                  className={`mb-2 px-3 py-2 rounded-xl border-l-4 flex items-center justify-between ${isDark ? 'bg-gray-700 border-purple-500' : 'bg-gray-50 border-purple-500'}`}
                 >
-                  <div className="flex-1 min-w-0 pr-4">
-                    <p className="text-[10px] font-bold text-purple-500 uppercase tracking-wider mb-0.5">답장하기</p>
+                  <div className="flex-1 min-w-0 pr-3">
+                    <p className="text-[10px] font-bold text-purple-500 uppercase tracking-wider mb-0.5">답장</p>
                     <p className={`text-xs truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
                       {replyingTo.text}
                     </p>
@@ -474,25 +539,31 @@ export default function App() {
                     onClick={() => setReplyingTo(null)}
                     className={`p-1 rounded-full ${isDark ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-500'}`}
                   >
-                    <Settings size={14} className="rotate-45" /> {/* Use X icon if available, using Settings rotated for now as Lucide X might not be imported */}
+                    <XIcon size={14} />
                   </button>
                 </motion.div>
               )}
-              <div className="flex gap-2">
-                <input
-                  type="text"
+              <div className="flex items-end gap-2">
+                <textarea
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                  placeholder="E2EE Protected Message..."
-                  className={`flex-1 px-4 py-2.5 border rounded-lg focus:outline-none focus:border-gray-300 transition-all ${isDark
-                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:bg-gray-700 focus:border-gray-500'
-                    : 'bg-gray-50 border-gray-200 text-gray-800 placeholder-gray-400 focus:bg-white focus:border-gray-300'
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                  placeholder="메시지 입력..."
+                  rows={1}
+                  className={`flex-1 px-4 py-2.5 border rounded-2xl focus:outline-none transition-all resize-none overflow-y-auto max-h-28 ${isDark
+                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-500 focus:border-gray-500'
+                    : 'bg-gray-100 border-transparent text-gray-800 placeholder-gray-400 focus:bg-white focus:border-gray-300'
                     }`}
                 />
                 <button
                   onClick={handleSendMessage}
-                  className={`p-2.5 bg-gradient-to-r ${colors.bg} text-white rounded-lg hover:opacity-90 transition-opacity flex items-center justify-center`}
+                  disabled={!inputValue.trim()}
+                  className={`p-2.5 bg-gradient-to-r ${colors.bg} text-white rounded-full hover:opacity-90 active:scale-95 transition-all flex items-center justify-center flex-shrink-0 disabled:opacity-40`}
                 >
                   <Send size={18} />
                 </button>
