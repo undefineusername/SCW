@@ -373,6 +373,18 @@ export default function App() {
       <div className={`flex-1 flex flex-col ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
         {selectedConversation ? (
           <>
+            {/* Chat Header */}
+            <ChatHeader
+              name={conversations.find((c: any) => c.id === selectedConversation)?.username || 'Chat'}
+              avatar={conversations.find((c: any) => c.id === selectedConversation)?.avatar || ''}
+              themeAccent={colors.accent}
+              isDark={isDark}
+              fontSize={fontSize}
+              secret={conversations.find((c: any) => c.id === selectedConversation)?.secret}
+              onSecretChange={handleSecretChange}
+              isOnline={presence[selectedConversation] === 'online'}
+            />
+
             {/* Stranger Banner (O/X) */}
             {(() => {
               const friend = friends.find((f: any) => f.uuid === selectedConversation);
@@ -385,7 +397,7 @@ export default function App() {
                   <motion.div
                     initial={{ height: 0, opacity: 0 }}
                     animate={{ height: 'auto', opacity: 1 }}
-                    className={`px-6 py-4 border-b flex items-center justify-between z-20 ${isDark ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-blue-100 text-gray-900'} shadow-lg sticky top-0`}
+                    className={`px-6 py-4 border-b flex items-center justify-between z-10 ${isDark ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-blue-100 text-gray-900'} shadow-lg sticky top-0`}
                   >
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-xl ${isDark ? 'bg-gray-800' : 'bg-blue-50'}`}>
@@ -419,18 +431,6 @@ export default function App() {
               }
               return null;
             })()}
-
-            {/* Chat Header */}
-            <ChatHeader
-              name={conversations.find((c: any) => c.id === selectedConversation)?.username || 'Chat'}
-              avatar={conversations.find((c: any) => c.id === selectedConversation)?.avatar || ''}
-              themeAccent={colors.accent}
-              isDark={isDark}
-              fontSize={fontSize}
-              secret={conversations.find((c: any) => c.id === selectedConversation)?.secret}
-              onSecretChange={handleSecretChange}
-              isOnline={presence[selectedConversation] === 'online'}
-            />
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-6 py-6 space-y-2 bg-[url('/chat-bg.png')] bg-repeat bg-fixed opacity-95">
