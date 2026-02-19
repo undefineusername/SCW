@@ -9,7 +9,7 @@ import CreateGroupModal from './create-group-modal';
 
 interface FriendsListProps {
     isDark: boolean;
-    currentUser: { uuid: string; username: string };
+    currentUser: { uuid: string; username: string; avatar?: string };
     onNewChat: (uuid: string) => void;
     sendMessage: (to: string, text: string) => Promise<string | undefined>;
     pendingInviteCode?: string | null;
@@ -129,7 +129,7 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
             await db.conversations.add({
                 id: uuid,
                 username: username,
-                avatar: '👤',
+                avatar: friendEntry?.avatar || '👤',
                 lastMessage: 'Friend request accepted',
                 lastTimestamp: new Date(),
                 unreadCount: 0,
@@ -232,8 +232,12 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
             <div className="flex-1 overflow-y-auto pb-6">
                 <div className="px-5 py-5">
                     <div className="flex items-center gap-4">
-                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-sm ${isDark ? 'bg-gray-800' : 'bg-white border border-gray-100'}`}>
-                            👤
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-sm overflow-hidden ${isDark ? 'bg-gray-800' : 'bg-white border border-gray-100'}`}>
+                            {currentUser.avatar?.startsWith('data:image') ? (
+                                <img src={currentUser.avatar} alt="Me" className="w-full h-full object-cover" />
+                            ) : (
+                                currentUser.avatar || '👤'
+                            )}
                         </div>
                         <div className="flex-1">
                             <h3 className={`font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{currentUser.username} (Me)</h3>
@@ -272,8 +276,12 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
                                     className={`group flex items-center gap-3 p-2 rounded-xl transition-colors ${isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-100'} cursor-pointer`}
                                     onClick={() => onNewChat(friend.uuid)}
                                 >
-                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0 ${isDark ? 'bg-gray-700' : 'bg-gray-200'}`}>
-                                        {friend.avatar || '👤'}
+                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0 overflow-hidden ${isDark ? 'bg-gray-700' : 'bg-gray-200'}`}>
+                                        {friend.avatar?.startsWith('data:image') ? (
+                                            <img src={friend.avatar} alt={friend.username} className="w-full h-full object-cover" />
+                                        ) : (
+                                            friend.avatar || '👤'
+                                        )}
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         {editingUuid === friend.uuid ? (

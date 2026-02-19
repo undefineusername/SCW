@@ -93,9 +93,13 @@ export default function ChatMessage({
           {/* 아바타 자리 */}
           <div className={`${AVATAR_WIDTH} flex-shrink-0 flex items-end mr-1.5`}>
             {isGroup && isFirstInGroup ? (
-              <div className={`w-9 h-9 rounded-full flex items-center justify-center text-base overflow-hidden select-none ${isDark ? 'bg-gray-600' : 'bg-gray-200'
+              <div className={`w-9 h-9 rounded-full flex items-center justify-center text-base overflow-hidden select-none shadow-sm ${isDark ? 'bg-gray-600' : 'bg-gray-200'
                 }`}>
-                {message.senderAvatar || '👤'}
+                {message.senderAvatar?.startsWith('data:image') ? (
+                  <img src={message.senderAvatar} alt={message.senderName} className="w-full h-full object-cover" />
+                ) : (
+                  message.senderAvatar || '👤'
+                )}
               </div>
             ) : (
               // 연속 메시지면 아바타 자리만 비워둠

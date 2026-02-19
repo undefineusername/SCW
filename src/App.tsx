@@ -30,7 +30,7 @@ export default function App() {
   const [fontSize, setFontSize] = useState<'sm' | 'md' | 'lg'>(() => (localStorage.getItem('chat-font-size') as 'sm' | 'md' | 'lg') || 'md')
   const [fontFamily, setFontFamily] = useState<'sans' | 'serif'>(() => (localStorage.getItem('chat-font-family') as 'sans' | 'serif') || 'sans')
 
-  const [currentUser, setCurrentUser] = useState<{ uuid: string; key: Uint8Array; username: string; salt?: string; kdfParams?: any } | null>(null)
+  const [currentUser, setCurrentUser] = useState<{ uuid: string; key: Uint8Array; username: string; avatar?: string; salt?: string; kdfParams?: any } | null>(null)
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'friends' | 'chats' | 'settings'>('chats')
   const [inputValue, setInputValue] = useState('')
@@ -64,6 +64,7 @@ export default function App() {
               uuid: account.id,
               key: keyArray,
               username: account.username,
+              avatar: account.avatar,
               salt: account.salt,
               kdfParams: account.kdfParams
             });
@@ -102,9 +103,16 @@ export default function App() {
     localStorage.setItem('chat-font-family', fontFamily)
   }, [fontFamily])
 
-  const handleAuthenticated = (uuid: string, key: Uint8Array, username: string, salt?: string, kdfParams?: any) => {
+  const handleAuthenticated = (uuid: string, key: Uint8Array, username: string, avatar?: string, salt?: string, kdfParams?: any) => {
     localStorage.setItem(`key_${uuid}`, JSON.stringify(Array.from(key)));
-    setCurrentUser({ uuid, key, username, salt, kdfParams });
+    setCurrentUser({ uuid, key, username, avatar, salt, kdfParams });
+  };
+
+  const handleUpdateAvatar = async (newAvatar: string) => {
+    if (currentUser) {
+      await db.accounts.update(currentUser.uuid, { avatar: newAvatar });
+      setCurrentUser(prev => prev ? { ...prev, avatar: newAvatar } : null);
+    }
   };
 
   const { isConnected, sendMessage, presence } = useChat(
@@ -290,9 +298,17 @@ export default function App() {
       isBlocked: false
     });
 
+    // 1. Send FRIEND_ACCEPT
     await sendMessage(uuid, JSON.stringify({
       system: true,
       type: 'FRIEND_ACCEPT',
+      username: currentUser?.username
+    }));
+
+    // 2. Send automatic PING to confirm E2EE and sync keys
+    await sendMessage(uuid, JSON.stringify({
+      system: true,
+      type: 'E2EE_PING',
       username: currentUser?.username
     }));
   };
@@ -493,44 +509,50 @@ export default function App() {
 
             {/* Messages */}
             <div className={`flex-1 overflow-y-auto py-3 ${isDark ? 'bg-gray-900' : 'bg-[#B2C7D9]'}`}>
-              {processedMessages.map((item: any) => {
-                // 날짜 구분선
-                if (item.type === 'date') {
-                  return <DateDivider key={item.id} date={item.date} isDark={isDark} />
-                }
+              {processedMessages
+                .filter(item => {
+                  if (item.type === 'date') return true;
+                  // Hide decryption error messages
+                  return item.text !== DECRYPTION_ERROR_MSG && item.text !== NO_KEY_ERROR_MSG;
+                })
+                .map((item: any) => {
+                  // 날짜 구분선
+                  if (item.type === 'date') {
+                    return <DateDivider key={item.id} date={item.date} isDark={isDark} />
+                  }
 
-                const conv = conversations.find((c: any) => c.id === selectedConversation)
-                const isGroupChat = conv?.isGroup
-                const isMyMsg = item.isEcho || item.from === currentUser?.uuid
-                const senderFriend = friends.find((f: any) => f.uuid === item.from)
+                  const conv = conversations.find((c: any) => c.id === selectedConversation)
+                  const isGroupChat = conv?.isGroup
+                  const isMyMsg = item.isEcho || item.from === currentUser?.uuid
+                  const senderFriend = friends.find((f: any) => f.uuid === item.from)
 
-                return (
-                  <ChatMessage
-                    key={item.msgId || item.id}
-                    message={{
-                      id: item.msgId,
-                      text: item.text,
-                      sender: isMyMsg ? 'user' : 'other',
-                      timestamp: item.timestamp instanceof Date ? item.timestamp : new Date(item.timestamp),
-                      status: item.status,
-                      isEcho: item.isEcho,
-                      replyToText: item.replyToText,
-                      replyToSender: item.replyToSender,
-                      senderName: isMyMsg ? '나' : (senderFriend?.username || (item.from ? `User-${item.from.slice(0, 4)}` : '상대방')),
-                      senderAvatar: isMyMsg ? '' : (senderFriend?.avatar || '👤'),
-                      type: item.type === 'system' ? 'system' : 'text',
-                    }}
-                    isDark={isDark}
-                    fontSize={fontSize}
-                    onReply={(msg) => setReplyingTo(msg)}
-                    isGroup={isGroupChat}
-                    isFirstInGroup={item._isFirst}
-                    isLastInGroup={item._isLast}
-                    showTime={item._isLast}
-                    showUnread={item._showUnread}
-                  />
-                )
-              })}
+                  return (
+                    <ChatMessage
+                      key={item.msgId || item.id}
+                      message={{
+                        id: item.msgId,
+                        text: item.text,
+                        sender: isMyMsg ? 'user' : 'other',
+                        timestamp: item.timestamp instanceof Date ? item.timestamp : new Date(item.timestamp),
+                        status: item.status,
+                        isEcho: item.isEcho,
+                        replyToText: item.replyToText,
+                        replyToSender: item.replyToSender,
+                        senderName: isMyMsg ? '나' : (senderFriend?.username || (item.from ? `User-${item.from.slice(0, 4)}` : '상대방')),
+                        senderAvatar: isMyMsg ? '' : (senderFriend?.avatar || '👤'),
+                        type: item.type === 'system' ? 'system' : 'text',
+                      }}
+                      isDark={isDark}
+                      fontSize={fontSize}
+                      onReply={(msg) => setReplyingTo(msg)}
+                      isGroup={isGroupChat}
+                      isFirstInGroup={item._isFirst}
+                      isLastInGroup={item._isLast}
+                      showTime={item._isLast}
+                      showUnread={item._showUnread}
+                    />
+                  )
+                })}
               <div ref={messagesEndRef} />
             </div>
 
@@ -610,6 +632,8 @@ export default function App() {
         onFontSizeChange={setFontSize}
         fontFamily={fontFamily}
         onFontFamilyChange={setFontFamily}
+        avatar={currentUser.avatar}
+        onUpdateAvatar={handleUpdateAvatar}
       />
     </div >
   )

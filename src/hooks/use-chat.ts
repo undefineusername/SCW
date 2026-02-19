@@ -16,7 +16,7 @@ export const DECRYPTION_ERROR_MSG = "[🔒 암호화된 메시지 - Key가 맞�
 export const NO_KEY_ERROR_MSG = "[🔒 암호화된 메시지 - Key가 설정되지 않음]";
 
 export function useChat(
-    user: { uuid: string; key: Uint8Array; username: string; salt?: string; kdfParams?: any } | null,
+    user: { uuid: string; key: Uint8Array; username: string; avatar?: string; salt?: string; kdfParams?: any } | null,
     selectedConversationUuid: string | null
 ) {
     const [isConnected, setIsConnected] = useState(false);
@@ -244,15 +244,23 @@ export function useChat(
                                         await db.friends.add({
                                             uuid: data.from,
                                             username: payload.username || `User-${data.from.slice(0, 8)}`,
+                                            avatar: payload.avatar,
                                             isBlocked: false,
                                             status: 'pending_incoming',
                                             dhPublicKey: senderJWK
                                         });
                                     } else if (existing.status === 'pending_outgoing') {
                                         // Cross-request: both sent at same time → auto-accept
-                                        await db.friends.update(data.from, { status: 'friend', dhPublicKey: senderJWK || existing.dhPublicKey });
-                                    } else if (senderJWK) {
-                                        await db.friends.update(data.from, { dhPublicKey: senderJWK });
+                                        await db.friends.update(data.from, {
+                                            status: 'friend',
+                                            dhPublicKey: senderJWK || existing.dhPublicKey,
+                                            avatar: payload.avatar || existing.avatar
+                                        });
+                                    } else if (senderJWK || payload.avatar) {
+                                        await db.friends.update(data.from, {
+                                            dhPublicKey: senderJWK || existing?.dhPublicKey,
+                                            avatar: payload.avatar || existing?.avatar
+                                        });
                                     }
 
                                     // Always persist shared secret if derived, so future messages use correct key
@@ -263,14 +271,17 @@ export function useChat(
                                             await db.conversations.put({
                                                 id: data.from,
                                                 username: friendName,
-                                                avatar: '👤',
+                                                avatar: payload.avatar || '👤',
                                                 lastMessage: '',
                                                 lastTimestamp: new Date(),
                                                 unreadCount: 0,
                                                 secret: newSharedSecret
                                             });
-                                        } else if (!existingConv.secret) {
-                                            await db.conversations.update(data.from, { secret: newSharedSecret });
+                                        } else if (!existingConv.secret || payload.avatar) {
+                                            await db.conversations.update(data.from, {
+                                                secret: newSharedSecret || existingConv.secret,
+                                                avatar: payload.avatar || existingConv.avatar
+                                            });
                                         }
                                     }
                                     return; // Do not save as chat message
@@ -278,7 +289,10 @@ export function useChat(
                                 else if (payload.type === 'FRIEND_ACCEPT') {
                                     const friendEntry = await db.friends.get(data.from);
                                     const resolvedUsername = friendEntry?.username || payload.username || `User-${data.from.slice(0, 8)}`;
-                                    await db.friends.update(data.from, { status: 'friend' });
+                                    await db.friends.update(data.from, {
+                                        status: 'friend',
+                                        avatar: payload.avatar || friendEntry?.avatar
+                                    });
 
                                     // Always persist shared secret so A can immediately encrypt to B correctly
                                     if (newSharedSecret) {
@@ -287,7 +301,7 @@ export function useChat(
                                             await db.conversations.put({
                                                 id: data.from,
                                                 username: resolvedUsername,
-                                                avatar: '👤',
+                                                avatar: payload.avatar || '👤',
                                                 lastMessage: 'Friend Request Accepted',
                                                 lastTimestamp: new Date(),
                                                 unreadCount: 0,
@@ -297,12 +311,34 @@ export function useChat(
                                             // Always update secret on FRIEND_ACCEPT to ensure freshness
                                             await db.conversations.update(data.from, {
                                                 secret: newSharedSecret,
+                                                avatar: payload.avatar || existingConv.avatar,
                                                 lastMessage: 'Friend Request Accepted',
                                                 lastTimestamp: new Date()
                                             });
                                         }
                                     }
                                     return; // Do not save as chat message
+                                }
+                                else if (payload.type === 'E2EE_PING' || payload.type === 'E2EE_PONG') {
+                                    console.log(`⚡ E2EE ${payload.type} received from`, data.from);
+
+                                    // Update avatar if present in ping/pong
+                                    if (payload.avatar) {
+                                        await db.friends.update(data.from, { avatar: payload.avatar });
+                                        const conv = await db.conversations.get(data.from);
+                                        if (conv) await db.conversations.update(data.from, { avatar: payload.avatar });
+                                    }
+
+                                    if (payload.type === 'E2EE_PING') {
+                                        // Automatically respond with PONG to ensure bidirectional key sync
+                                        sendMessage(data.from, JSON.stringify({
+                                            system: true,
+                                            type: 'E2EE_PONG',
+                                            username: user?.username,
+                                            avatar: user?.avatar
+                                        }));
+                                    }
+                                    return;
                                 }
                                 else if (payload.type === 'FRIEND_REJECT') {
                                     await db.friends.delete(data.from);
@@ -507,6 +543,14 @@ export function useChat(
         };
 
         markAsRead();
+
+        // Proactively send PING to sync avatar and keys when selecting a chat
+        if (selectedConversationUuid && !conversations.find(c => c.id === selectedConversationUuid)?.isGroup) {
+            sendMessage(selectedConversationUuid, JSON.stringify({
+                system: true,
+                type: 'E2EE_PING'
+            }));
+        }
     }, [selectedConversationUuid, currentUserUuid]);
 
     // Presence Polling for selected conversation
@@ -550,8 +594,15 @@ export function useChat(
             // 2. Pack Payload
             let jsonPayload: string;
             if (isSystem) {
-                // For system messages, send exactly what was provided (e.g. FRIEND_REQUEST)
-                jsonPayload = text;
+                // For system messages, automatically inject current user's profile info
+                try {
+                    const parsed = JSON.parse(text);
+                    parsed.username = user!.username;
+                    parsed.avatar = user!.avatar;
+                    jsonPayload = JSON.stringify(parsed);
+                } catch (e) {
+                    jsonPayload = text;
+                }
             } else {
                 // For normal messages, wrap with metadata
                 const payloadData: any = {
@@ -647,7 +698,7 @@ export function useChat(
             console.error('Send message failed:', err);
             await db.messages.where('msgId').equals(msgId).modify({ status: 'failed' });
         }
-    }, [currentUserUuid, encryptionKey]);
+    }, [currentUserUuid, encryptionKey, user]);
 
     return { isConnected, conversations, sendMessage, presence };
 }

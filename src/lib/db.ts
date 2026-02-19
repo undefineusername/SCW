@@ -44,6 +44,7 @@ export interface Friend {
 export interface UserAccount {
     id: string; // generated UUID
     username: string;
+    avatar?: string; // Base64 encoded profile picture
     salt: string;
     kdfParams: any;
     // DH Key Pair (ECDH P-384) - Stored mainly to regenerate session keys

@@ -58,9 +58,13 @@ export default function ChatHeader({
         <div className="flex items-center justify-between">
           {/* 왼쪽: 아바타 + 이름 + 상태 */}
           <div className="flex items-center gap-3 min-w-0">
-            <div className={`relative w-9 h-9 rounded-full flex items-center justify-center text-base flex-shrink-0 ${isDark ? 'bg-gray-700' : 'bg-gray-200'
+            <div className={`relative w-9 h-9 rounded-full flex items-center justify-center text-base flex-shrink-0 shadow-sm overflow-hidden ${isDark ? 'bg-gray-700' : 'bg-gray-200'
               }`}>
-              {isGroup ? '👥' : avatar}
+              {isGroup ? '👥' : (
+                avatar?.startsWith('data:image') ? (
+                  <img src={avatar} alt={name} className="w-full h-full object-cover" />
+                ) : (avatar || '👤')
+              )}
               {!isGroup && isOnline && (
                 <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 border-2 border-white dark:border-gray-800 rounded-full" />
               )}
@@ -78,8 +82,8 @@ export default function ChatHeader({
                 )}
               </div>
               <p className={`text-[11px] font-medium ${isGroup
-                  ? (isDark ? 'text-gray-500' : 'text-gray-400')
-                  : isOnline ? 'text-green-500' : (isDark ? 'text-gray-500' : 'text-gray-400')
+                ? (isDark ? 'text-gray-500' : 'text-gray-400')
+                : isOnline ? 'text-green-500' : (isDark ? 'text-gray-500' : 'text-gray-400')
                 }`}>
                 {isGroup
                   ? `참여자 ${memberCount}명`
@@ -166,9 +170,11 @@ export default function ChatHeader({
               <div className="flex flex-wrap gap-3">
                 {participants.map((p) => (
                   <div key={p.uuid} className="flex flex-col items-center gap-1">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-base ${isDark ? 'bg-gray-700' : 'bg-gray-200'
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-base overflow-hidden shadow-sm ${isDark ? 'bg-gray-700' : 'bg-gray-200'
                       }`}>
-                      {p.avatar || '👤'}
+                      {p.avatar?.startsWith('data:image') ? (
+                        <img src={p.avatar} alt={p.username} className="w-full h-full object-cover" />
+                      ) : (p.avatar || '👤')}
                     </div>
                     <span className={`text-[10px] font-medium text-center max-w-[52px] truncate ${isDark ? 'text-gray-400' : 'text-gray-600'
                       }`}>

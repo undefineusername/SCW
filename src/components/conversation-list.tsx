@@ -52,9 +52,14 @@ function GroupAvatarGrid({ participants, isDark }: { participants: Participant[]
   }
 
   if (count === 1) {
+    const avatar = members[0].avatar
     return (
       <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl overflow-hidden ${isDark ? 'bg-gray-700' : 'bg-gray-200'}`}>
-        {members[0].avatar || '👤'}
+        {avatar?.startsWith('data:image') ? (
+          <img src={avatar} alt="avatar" className="w-full h-full object-cover" />
+        ) : (
+          avatar || '👤'
+        )}
       </div>
     )
   }
@@ -64,7 +69,11 @@ function GroupAvatarGrid({ participants, isDark }: { participants: Participant[]
       <div className="w-12 h-12 rounded-xl overflow-hidden grid grid-cols-2 gap-[1px]">
         {members.map((m) => (
           <div key={m.uuid} className={`${cellBase}`}>
-            {m.avatar || '👤'}
+            {m.avatar?.startsWith('data:image') ? (
+              <img src={m.avatar} alt="avatar" className="w-full h-full object-cover" />
+            ) : (
+              m.avatar || '👤'
+            )}
           </div>
         ))}
       </div>
@@ -76,7 +85,11 @@ function GroupAvatarGrid({ participants, isDark }: { participants: Participant[]
     <div className="w-12 h-12 rounded-xl overflow-hidden grid grid-cols-2 gap-[1px]">
       {[0, 1, 2, 3].map((i) => (
         <div key={i} className={`${cellBase} text-xs`}>
-          {members[i]?.avatar || (members[i] ? '👤' : '')}
+          {members[i]?.avatar?.startsWith('data:image') ? (
+            <img src={members[i].avatar} alt="avatar" className="w-full h-full object-cover" />
+          ) : (
+            members[i]?.avatar || (members[i] ? '👤' : '')
+          )}
         </div>
       ))}
     </div>
@@ -86,9 +99,13 @@ function GroupAvatarGrid({ participants, isDark }: { participants: Participant[]
 // ─── 1:1 아바타 ─────────────────────────────────────────────────────
 function SingleAvatar({ avatar, isOnline, isDark }: { avatar: string; isOnline?: boolean; isDark: boolean }) {
   return (
-    <div className={`relative w-12 h-12 rounded-full flex items-center justify-center text-xl flex-shrink-0 shadow-sm ${isDark ? 'bg-gray-700' : 'bg-gray-200'
+    <div className={`relative w-12 h-12 rounded-full flex items-center justify-center text-xl flex-shrink-0 shadow-sm overflow-hidden ${isDark ? 'bg-gray-700' : 'bg-gray-200'
       }`}>
-      {avatar}
+      {avatar?.startsWith('data:image') ? (
+        <img src={avatar} alt="avatar" className="w-full h-full object-cover" />
+      ) : (
+        avatar || '👤'
+      )}
       {isOnline && (
         <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-500 border-2 border-white dark:border-gray-900 rounded-full" />
       )}
@@ -130,8 +147,8 @@ export default function ConversationList({
     <button
       onClick={onSelect}
       className={`w-full px-4 py-3.5 transition-all text-left border-l-[3px] ${isSelected
-          ? `${isDark ? colors.bgDark : colors.bg} ${colors.border}`
-          : `${isDark ? 'hover:bg-gray-800/60' : 'hover:bg-gray-100/70'} border-l-transparent`
+        ? `${isDark ? colors.bgDark : colors.bg} ${colors.border}`
+        : `${isDark ? 'hover:bg-gray-800/60' : 'hover:bg-gray-100/70'} border-l-transparent`
         }`}
     >
       <div className="flex items-center gap-3">
