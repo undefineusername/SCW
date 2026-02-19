@@ -44,7 +44,11 @@ export default function VoiceCallOverlay({
 
     useEffect(() => {
         if (audioRef.current && remoteStream) {
+            console.log("🔊 Attaching remote stream to audio element");
             audioRef.current.srcObject = remoteStream;
+            audioRef.current.play().catch(e => {
+                console.error("❌ Audio playback failed:", e);
+            });
         }
     }, [remoteStream]);
 
