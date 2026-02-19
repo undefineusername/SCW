@@ -415,6 +415,21 @@ export default function App() {
             <h2 className={`text-xl font-bold p-5 ${isDark ? 'text-white' : 'text-gray-900'}`}>Settings</h2>
 
             <div className="flex-1 overflow-y-auto px-5 space-y-6">
+              {/* Profile Summary in Sidebar */}
+              <div className={`p-4 rounded-2xl flex items-center gap-4 ${isDark ? 'bg-gray-800/50' : 'bg-gray-50'}`}>
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl overflow-hidden ${isDark ? 'bg-gray-700' : 'bg-white shadow-sm'}`}>
+                  {currentUser?.avatar?.startsWith('data:image') ? (
+                    <img src={currentUser.avatar} alt="Me" className="w-full h-full object-cover" />
+                  ) : (
+                    currentUser?.avatar || '👤'
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`font-bold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{currentUser?.username}</p>
+                  <p className="text-[10px] text-gray-500 font-mono truncate">{currentUser?.uuid}</p>
+                </div>
+              </div>
+
               <div className="space-y-1">
                 <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest px-1 mb-2 block">Application</span>
                 <button
@@ -632,7 +647,7 @@ export default function App() {
         onFontSizeChange={setFontSize}
         fontFamily={fontFamily}
         onFontFamilyChange={setFontFamily}
-        avatar={currentUser.avatar}
+        avatar={currentUser?.avatar}
         onUpdateAvatar={handleUpdateAvatar}
       />
     </div >
