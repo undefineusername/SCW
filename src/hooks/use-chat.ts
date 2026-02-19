@@ -166,6 +166,39 @@ export function useChat(
                         }
                     }
 
+                    // --- Auto-Register Stranger (1:1) ---
+                    // If we receive a message from a complete stranger, add them to the friends table
+                    // without a status, so the banner logic in App.tsx can identify them.
+                    const isGroupMessage = !!msgGroupId;
+                    if (!isGroupMessage) {
+                        const stranger = await db.friends.get(data.from);
+                        if (!stranger) {
+                            const senderJWK = senderPubRaw ? await crypto.subtle.exportKey(
+                                'jwk',
+                                await crypto.subtle.importKey(
+                                    'raw', senderPubRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, []
+                                )
+                            ) as JsonWebKey : undefined;
+
+                            await db.friends.add({
+                                uuid: data.from,
+                                username: `User-${data.from.slice(0, 8)}`,
+                                isBlocked: false,
+                                dhPublicKey: senderJWK
+                            });
+                            console.log("👤 Stranger registered in friends table:", data.from);
+                        } else if (senderPubRaw && !stranger.dhPublicKey) {
+                            // Update pubkey if we didn't have it
+                            const senderJWK = await crypto.subtle.exportKey(
+                                'jwk',
+                                await crypto.subtle.importKey(
+                                    'raw', senderPubRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, []
+                                )
+                            ) as JsonWebKey;
+                            await db.friends.update(data.from, { dhPublicKey: senderJWK });
+                        }
+                    }
+
                     // --- Auto-Save Shared Secret (1:1) ---
                     // Secrets are between individual users, so we always map to 'data.from'
                     if (newSharedSecret) {
