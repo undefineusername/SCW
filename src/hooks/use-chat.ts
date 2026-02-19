@@ -31,8 +31,9 @@ export function useChat(
     useEffect(() => {
         if (!currentUserUuid) return;
 
-        const checkKeys = async () => {
-            const account = await db.accounts.get(currentUserUuid);
+        const checkAndSyncKeys = async () => {
+            let account = await db.accounts.get(currentUserUuid);
+
             if (account && !account.dhPrivateKey) {
                 console.log("🔑 Generating new DH Key Pair for", currentUserUuid);
                 const keys = await generateDHKeyPair();
@@ -40,11 +41,25 @@ export function useChat(
                     dhPrivateKey: keys.privateKey,
                     dhPublicKey: keys.publicKey
                 });
+                account = await db.accounts.get(currentUserUuid); // Refresh
                 console.log("✅ DH Keys Generated and Saved.");
             }
+
+            if (account?.dhPublicKey && isConnected) {
+                const socket = getSocket();
+                // Re-register to ensure server has our public key
+                socket.emit('register_master', {
+                    uuid: currentUserUuid,
+                    username: user!.username,
+                    salt: user!.salt,
+                    kdfParams: user!.kdfParams,
+                    publicKey: account.dhPublicKey
+                });
+                console.log("📤 Public Key Synced to Server.");
+            }
         };
-        checkKeys();
-    }, [currentUserUuid]);
+        checkAndSyncKeys();
+    }, [currentUserUuid, isConnected]);
 
     useEffect(() => {
         if (!currentUserUuid || !encryptionKey) return;
@@ -118,6 +133,7 @@ export function useChat(
                         }
                     }
 
+                    let msgGroupId: string | undefined = undefined;
                     let conversationId = isEcho ? data.to : data.from;
                     const conv = await db.conversations.get(conversationId);
 
@@ -134,14 +150,19 @@ export function useChat(
                     } catch (e) {
                         // Fallback logic for legacy messages or failed derivation
                         console.warn("Decryption failed, trying fallback...", e);
-                        if (activeKey !== encryptionKey) {
+
+                        // 1. Try decrypting the protocol-stripped bytes with the master key
+                        // (Case: Sender has DH keys and sent their pub, but didn't have OUR pub yet)
+                        try {
+                            text = await decryptMessage(encryptedBytes, encryptionKey);
+                        } catch (e2) {
+                            // 2. Try decrypting the original raw payload with the master key
+                            // (Case: Legacy format or completely different protocol)
                             try {
-                                text = await decryptMessage(fullPayload, encryptionKey); // Try original payload
-                            } catch (e2) {
+                                text = await decryptMessage(fullPayload, encryptionKey);
+                            } catch (e3) {
                                 text = DECRYPTION_ERROR_MSG;
                             }
-                        } else {
-                            text = NO_KEY_ERROR_MSG;
                         }
                     }
 
@@ -150,8 +171,9 @@ export function useChat(
                     let replyToData: { id?: string, text?: string, sender?: string } = {};
 
                     try {
-                        if (text.startsWith('{') && text.endsWith('}')) {
-                            const payload = JSON.parse(text);
+                        const trimmedText = text.trim();
+                        if (trimmedText.startsWith('{') && trimmedText.endsWith('}')) {
+                            const payload = JSON.parse(trimmedText);
 
                             // 1. System Message Handler
                             if (payload.system === true && payload.type) {
@@ -227,7 +249,8 @@ export function useChat(
 
                                 // Group Chat Routing
                                 if (payload.groupId) {
-                                    data.from = payload.groupId; // Route to group conversation
+                                    msgGroupId = payload.groupId;
+                                    conversationId = msgGroupId as string;
                                 }
                             }
                         }
@@ -268,7 +291,8 @@ export function useChat(
                         rawPayload: Array.from(fullPayload),
                         timestamp: new Date(data.timestamp),
                         status: (isEcho || isCurrentChat) ? 'read' : 'sent',
-                        isEcho
+                        isEcho,
+                        groupId: msgGroupId
                     };
 
                     const exists = await db.messages.where('msgId').equals(msgId).first();
@@ -425,25 +449,38 @@ export function useChat(
 
         try {
             const conv = await db.conversations.get(toUuid);
-            if (!conv) return;
-
-            const isGroup = conv.isGroup && conv.participants;
+            const isGroup = conv?.isGroup && conv?.participants;
             const participants = isGroup ? conv.participants! : [toUuid];
 
-            // Pack JSON payload
-            const payloadData: any = {
-                text,
-                timestamp,
-                groupId: isGroup ? toUuid : undefined
-            };
+            // 1. Determine if this is a system message (already JSON)
+            let isSystem = false;
+            try {
+                if (text.trim().startsWith('{')) {
+                    const parsed = JSON.parse(text);
+                    if (parsed.system === true) isSystem = true;
+                }
+            } catch (e) { }
 
-            if (replyTo) {
-                payloadData.replyToId = replyTo.id;
-                payloadData.replyToText = replyTo.text;
-                payloadData.replyToSender = replyTo.sender;
+            // 2. Pack Payload
+            let jsonPayload: string;
+            if (isSystem) {
+                // For system messages, send exactly what was provided (e.g. FRIEND_REQUEST)
+                jsonPayload = text;
+            } else {
+                // For normal messages, wrap with metadata
+                const payloadData: any = {
+                    text,
+                    timestamp,
+                    groupId: isGroup ? toUuid : undefined
+                };
+
+                if (replyTo) {
+                    payloadData.replyToId = replyTo.id;
+                    payloadData.replyToText = replyTo.text;
+                    payloadData.replyToSender = replyTo.sender;
+                }
+                jsonPayload = JSON.stringify(payloadData);
             }
-
-            const jsonPayload = JSON.stringify(payloadData);
 
             // Fan-out: Encrypt and send to each participant
             for (const participantUuid of participants) {
@@ -487,23 +524,28 @@ export function useChat(
                 }
             }
 
-            // Save ONE local message for the conversation (Group or 1:1)
-            await db.messages.add({
-                msgId,
-                from: currentUserUuid,
-                to: toUuid,
-                text,
-                replyToId: replyTo?.id,
-                replyToText: replyTo?.text,
-                replyToSender: replyTo?.sender,
-                timestamp: new Date(),
-                status: 'sending'
-            });
+            // 3. Save to Local DB (Only if NOT a system message, or special handling)
+            if (!isSystem) {
+                await db.messages.add({
+                    msgId,
+                    from: currentUserUuid,
+                    to: toUuid,
+                    text,
+                    replyToId: replyTo?.id,
+                    replyToText: replyTo?.text,
+                    replyToSender: replyTo?.sender,
+                    groupId: isGroup ? toUuid : undefined,
+                    timestamp: new Date(),
+                    status: 'sending'
+                });
 
-            await db.conversations.update(toUuid, {
-                lastMessage: text,
-                lastTimestamp: new Date()
-            });
+                if (toUuid !== currentUserUuid) { // Don't update conv for self-messages if any
+                    await db.conversations.update(toUuid, {
+                        lastMessage: text,
+                        lastTimestamp: new Date()
+                    });
+                }
+            }
 
             return msgId;
         } catch (err) {

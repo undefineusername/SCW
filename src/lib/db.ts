@@ -14,6 +14,8 @@ export interface LocalMessage {
     replyToId?: string;
     replyToText?: string;
     replyToSender?: string;
+    // Group Routing
+    groupId?: string;
 }
 
 export interface LocalConversation {
@@ -70,9 +72,9 @@ export class ChatDatabase extends Dexie {
             friends: 'uuid, username, isBlocked'
         });
 
-        // Version 5: Group Chats & Replies
-        this.version(5).stores({
-            messages: '++id, msgId, from, to, timestamp, status, replyToId',
+        // Version 6: Group Multi-Routing
+        this.version(6).stores({
+            messages: '++id, msgId, from, to, timestamp, status, replyToId, groupId',
             conversations: 'id, username, lastTimestamp, isGroup'
         });
     }

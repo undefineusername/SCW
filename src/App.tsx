@@ -115,7 +115,7 @@ export default function App() {
   const conversations = useLiveQuery(() => db.conversations.toArray()) || [];
   const friends = useLiveQuery(() => db.friends.toArray()) || [];
   const messages = useLiveQuery(
-    () => selectedConversation ? db.messages.where('from').equals(selectedConversation).or('to').equals(selectedConversation).sortBy('timestamp') : Promise.resolve([] as any[]),
+    () => selectedConversation ? db.messages.where('from').equals(selectedConversation).or('to').equals(selectedConversation).or('groupId').equals(selectedConversation).sortBy('timestamp') : Promise.resolve([] as any[]),
     [selectedConversation]
   ) || [] as any[];
 
