@@ -5,6 +5,7 @@ import { useChatKeys } from './chat/use-chat-keys';
 import { useChatPresence } from './chat/use-chat-presence';
 import { useChatActions } from './chat/use-chat-actions';
 import { useChatSocket } from './chat/use-chat-socket';
+export { DECRYPTION_ERROR_MSG, NO_KEY_ERROR_MSG } from './chat/chat-utils';
 
 export function useChat(
     user: { uuid: string; key: Uint8Array; username: string; avatar?: string; salt?: string; kdfParams?: any } | null,
