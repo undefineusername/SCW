@@ -166,6 +166,28 @@ export function useChat(
                         }
                     }
 
+                    // --- Auto-Save Shared Secret (1:1) ---
+                    // Secrets are between individual users, so we always map to 'data.from'
+                    if (newSharedSecret) {
+                        const existingConv = await db.conversations.get(data.from);
+                        const friendEntry = await db.friends.get(data.from);
+
+                        if (!existingConv || !existingConv.secret) {
+                            console.log("💾 Persisting new shared secret for:", data.from);
+                            await db.conversations.put({
+                                id: data.from,
+                                username: friendEntry?.username || `User-${data.from.slice(0, 8)}`,
+                                avatar: '👤',
+                                lastMessage: '',
+                                lastTimestamp: new Date(),
+                                unreadCount: 0,
+                                secret: newSharedSecret
+                            });
+                        } else if (existingConv.secret !== newSharedSecret) {
+                            await db.conversations.update(data.from, { secret: newSharedSecret });
+                        }
+                    }
+
                     // --- Message Parsing (System or Normal) ---
                     let msgText = text;
                     let replyToData: { id?: string, text?: string, sender?: string } = {};
@@ -260,20 +282,6 @@ export function useChat(
 
                     // --- Normal Message Handling ---
 
-                    // If we have a new secret and it's a valid normal message, SAVE IT NOW
-                    if (newSharedSecret) {
-                        const friendEntry = await db.friends.get(data.from);
-                        await db.conversations.put({
-                            id: data.from,
-                            username: friendEntry?.username || `User-${data.from.slice(0, 8)}`,
-                            avatar: '👤',
-                            lastMessage: '', // will update below
-                            lastTimestamp: new Date(),
-                            unreadCount: 0,
-                            secret: newSharedSecret
-                        });
-                        // Refresh conv object
-                    }
 
                     // Use msgId from data if available (e.g. from newer protocol), or generate one
                     const msgId = data.msgId || `msg_${data.timestamp}_${data.from}`;
@@ -491,11 +499,17 @@ export function useChat(
                     if (pConv?.secret) {
                         activeKey = await deriveKeyFromSecret(pConv.secret);
                     } else {
-                        const friend = await db.friends.get(participantUuid);
+                        let friend = await db.friends.get(participantUuid);
                         if (friend?.dhPublicKey) {
+                            let pubKey = friend.dhPublicKey;
+                            // Ensure it's an object (it might be a string from DB)
+                            if (typeof pubKey === 'string') {
+                                try { pubKey = JSON.parse(pubKey); } catch (e) { }
+                            }
+
                             const account = await db.accounts.get(currentUserUuid);
                             if (account?.dhPrivateKey) {
-                                const sharedSecretStr = await deriveSharedSecret(account.dhPrivateKey, friend.dhPublicKey);
+                                const sharedSecretStr = await deriveSharedSecret(account.dhPrivateKey, pubKey);
                                 await db.conversations.update(participantUuid, { secret: sharedSecretStr });
                                 activeKey = await deriveKeyFromSecret(sharedSecretStr);
                             }
