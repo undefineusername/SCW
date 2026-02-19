@@ -115,7 +115,20 @@ export default function App() {
   const conversations = useLiveQuery(() => db.conversations.toArray()) || [];
   const friends = useLiveQuery(() => db.friends.toArray()) || [];
   const messages = useLiveQuery(
-    () => selectedConversation ? db.messages.where('from').equals(selectedConversation).or('to').equals(selectedConversation).or('groupId').equals(selectedConversation).sortBy('timestamp') : Promise.resolve([] as any[]),
+    async () => {
+      if (!selectedConversation) return [];
+      const conv = await db.conversations.get(selectedConversation);
+      if (conv?.isGroup) {
+        return db.messages.where('groupId').equals(selectedConversation).sortBy('timestamp');
+      } else {
+        // 1:1 Chat: filter by from/to and ensure groupId is NOT present
+        return db.messages
+          .where('from').equals(selectedConversation)
+          .or('to').equals(selectedConversation)
+          .filter(msg => !msg.groupId)
+          .sortBy('timestamp');
+      }
+    },
     [selectedConversation]
   ) || [] as any[];
 

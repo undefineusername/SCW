@@ -3,6 +3,7 @@ import { Search, Edit2, CheckCircle2, Users, UserPlus } from 'lucide-react';
 import { db } from '@/lib/db';
 import { getSocket } from '@/lib/socket';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { deriveSharedSecret } from '@/lib/crypto';
 import AddFriendModal from './add-friend-modal';
 import CreateGroupModal from './create-group-modal';
 
@@ -105,24 +106,45 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
     };
 
     const handleAccept = async (uuid: string, username: string) => {
+        // Step 1: Mark as friend
+        const friendEntry = await db.friends.get(uuid);
         await db.friends.update(uuid, { status: 'friend' });
-        await sendMessage(uuid, JSON.stringify({
-            system: true,
-            type: 'FRIEND_ACCEPT',
-            username: currentUser.username
-        }));
 
-        const exists = await db.conversations.get(uuid);
-        if (!exists) {
+        // Step 2: Derive shared secret BEFORE sending (so sendMessage uses the right key)
+        let sharedSecret: string | undefined;
+        if (friendEntry?.dhPublicKey) {
+            const account = await db.accounts.get(currentUser.uuid);
+            if (account?.dhPrivateKey) {
+                try {
+                    sharedSecret = await deriveSharedSecret(account.dhPrivateKey, friendEntry.dhPublicKey);
+                } catch (e) {
+                    console.error('Failed to derive shared secret on accept:', e);
+                }
+            }
+        }
+
+        // Step 3: Save conversation WITH secret so sendMessage encrypts with correct key
+        const existingConv = await db.conversations.get(uuid);
+        if (!existingConv) {
             await db.conversations.add({
                 id: uuid,
                 username: username,
                 avatar: '👤',
                 lastMessage: 'Friend request accepted',
                 lastTimestamp: new Date(),
-                unreadCount: 0
+                unreadCount: 0,
+                secret: sharedSecret
             });
+        } else if (sharedSecret && !existingConv.secret) {
+            await db.conversations.update(uuid, { secret: sharedSecret });
         }
+
+        // Step 4: Send FRIEND_ACCEPT (now encrypted with the correct shared key)
+        await sendMessage(uuid, JSON.stringify({
+            system: true,
+            type: 'FRIEND_ACCEPT',
+            username: currentUser.username
+        }));
     };
 
 

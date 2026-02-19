@@ -166,37 +166,34 @@ export function useChat(
                         }
                     }
 
-                    // --- Auto-Register Stranger (1:1) ---
+                    // --- Auto-Register Stranger ---
                     // If we receive a message from a complete stranger, add them to the friends table
                     // without a status, so the banner logic in App.tsx can identify them.
-                    const isGroupMessage = !!msgGroupId;
-                    if (!isGroupMessage) {
-                        const stranger = await db.friends.get(data.from);
-                        if (!stranger) {
-                            const senderJWK = senderPubRaw ? await crypto.subtle.exportKey(
-                                'jwk',
-                                await crypto.subtle.importKey(
-                                    'raw', senderPubRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, []
-                                )
-                            ) as JsonWebKey : undefined;
+                    const stranger = await db.friends.get(data.from);
+                    if (!stranger) {
+                        const senderJWK = senderPubRaw ? await crypto.subtle.exportKey(
+                            'jwk',
+                            await crypto.subtle.importKey(
+                                'raw', senderPubRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, []
+                            )
+                        ) as JsonWebKey : undefined;
 
-                            await db.friends.add({
-                                uuid: data.from,
-                                username: `User-${data.from.slice(0, 8)}`,
-                                isBlocked: false,
-                                dhPublicKey: senderJWK
-                            });
-                            console.log("👤 Stranger registered in friends table:", data.from);
-                        } else if (senderPubRaw && !stranger.dhPublicKey) {
-                            // Update pubkey if we didn't have it
-                            const senderJWK = await crypto.subtle.exportKey(
-                                'jwk',
-                                await crypto.subtle.importKey(
-                                    'raw', senderPubRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, []
-                                )
-                            ) as JsonWebKey;
-                            await db.friends.update(data.from, { dhPublicKey: senderJWK });
-                        }
+                        await db.friends.add({
+                            uuid: data.from,
+                            username: `User-${data.from.slice(0, 8)}`,
+                            isBlocked: false,
+                            dhPublicKey: senderJWK
+                        });
+                        console.log("👤 User registered in friends table:", data.from);
+                    } else if (senderPubRaw && !stranger.dhPublicKey) {
+                        // Update pubkey if we didn't have it
+                        const senderJWK = await crypto.subtle.exportKey(
+                            'jwk',
+                            await crypto.subtle.importKey(
+                                'raw', senderPubRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, []
+                            )
+                        ) as JsonWebKey;
+                        await db.friends.update(data.from, { dhPublicKey: senderJWK });
                     }
 
                     // --- Auto-Save Shared Secret (1:1) ---
@@ -252,20 +249,29 @@ export function useChat(
                                             dhPublicKey: senderJWK
                                         });
                                     } else if (existing.status === 'pending_outgoing') {
+                                        // Cross-request: both sent at same time → auto-accept
                                         await db.friends.update(data.from, { status: 'friend', dhPublicKey: senderJWK || existing.dhPublicKey });
-                                        if (newSharedSecret) {
+                                    } else if (senderJWK) {
+                                        await db.friends.update(data.from, { dhPublicKey: senderJWK });
+                                    }
+
+                                    // Always persist shared secret if derived, so future messages use correct key
+                                    if (newSharedSecret) {
+                                        const existingConv = await db.conversations.get(data.from);
+                                        const friendName = existing?.username || payload.username || `User-${data.from.slice(0, 8)}`;
+                                        if (!existingConv) {
                                             await db.conversations.put({
                                                 id: data.from,
-                                                username: existing.username,
+                                                username: friendName,
                                                 avatar: '👤',
-                                                lastMessage: 'Friend Request Accepted',
+                                                lastMessage: '',
                                                 lastTimestamp: new Date(),
                                                 unreadCount: 0,
                                                 secret: newSharedSecret
                                             });
+                                        } else if (!existingConv.secret) {
+                                            await db.conversations.update(data.from, { secret: newSharedSecret });
                                         }
-                                    } else if (senderJWK) {
-                                        await db.friends.update(data.from, { dhPublicKey: senderJWK });
                                     }
                                     return; // Do not save as chat message
                                 }
@@ -273,16 +279,28 @@ export function useChat(
                                     const friendEntry = await db.friends.get(data.from);
                                     const resolvedUsername = friendEntry?.username || payload.username || `User-${data.from.slice(0, 8)}`;
                                     await db.friends.update(data.from, { status: 'friend' });
+
+                                    // Always persist shared secret so A can immediately encrypt to B correctly
                                     if (newSharedSecret) {
-                                        await db.conversations.put({
-                                            id: data.from,
-                                            username: resolvedUsername,
-                                            avatar: '👤',
-                                            lastMessage: 'Friend Request Accepted',
-                                            lastTimestamp: new Date(),
-                                            unreadCount: 0,
-                                            secret: newSharedSecret
-                                        });
+                                        const existingConv = await db.conversations.get(data.from);
+                                        if (!existingConv) {
+                                            await db.conversations.put({
+                                                id: data.from,
+                                                username: resolvedUsername,
+                                                avatar: '👤',
+                                                lastMessage: 'Friend Request Accepted',
+                                                lastTimestamp: new Date(),
+                                                unreadCount: 0,
+                                                secret: newSharedSecret
+                                            });
+                                        } else {
+                                            // Always update secret on FRIEND_ACCEPT to ensure freshness
+                                            await db.conversations.update(data.from, {
+                                                secret: newSharedSecret,
+                                                lastMessage: 'Friend Request Accepted',
+                                                lastTimestamp: new Date()
+                                            });
+                                        }
                                     }
                                     return; // Do not save as chat message
                                 }
@@ -392,6 +410,7 @@ export function useChat(
                                 id: conversationId,
                                 username: friendEntry?.username || `User-${conversationId.slice(0, 8)}`,
                                 avatar: '👤',
+                                isGroup: false,
                                 ...convUpdate
                             });
                         }
