@@ -35,6 +35,7 @@ export function useChatSocket(
 
         const initSocket = async () => {
             const account = await db.accounts.get(currentUserUuid);
+
             const socket = registerMaster({
                 uuid: user!.uuid,
                 username: user!.username,

@@ -10,7 +10,14 @@ export const getSocket = () => {
         socket = io(SOCKET_URL, {
             autoConnect: false,
             reconnection: true,
-            transports: ['websocket'] // Force websocket to avoid polling 400 errors on Railway
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+            timeout: 10000,
+            transports: ['polling', 'websocket'] // Try polling first, then upgrade (standard)
+        });
+
+        socket.on('connect_error', (err) => {
+            console.error('Socket Connection Error:', err.message);
         });
     }
     return socket;
