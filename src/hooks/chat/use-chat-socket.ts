@@ -119,24 +119,31 @@ export function useChatSocket(
                         sendMessage(data.from, JSON.stringify({ system: true, type: 'E2EE_PING' }));
                     }
 
-                    const stranger = await db.friends.get(data.from);
-                    if (!stranger) {
-                        const senderJWK = senderPubRaw ? await crypto.subtle.exportKey(
-                            'jwk',
-                            await crypto.subtle.importKey('raw', senderPubRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, [])
-                        ) as JsonWebKey : undefined;
-                        await db.friends.add({
-                            uuid: data.from,
-                            username: `User-${data.from.slice(0, 8)}`,
-                            isBlocked: false,
-                            dhPublicKey: senderJWK
-                        });
-                    } else if (senderPubRaw && !stranger.dhPublicKey) {
-                        const senderJWK = await crypto.subtle.exportKey(
-                            'jwk',
-                            await crypto.subtle.importKey('raw', senderPubRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, [])
-                        ) as JsonWebKey;
-                        await db.friends.update(data.from, { dhPublicKey: senderJWK });
+                    if (senderPubRaw && !isEcho && !isSystemMessage(text)) {
+                        try {
+                            if (senderPubRaw.length !== 97) {
+                                console.warn(`⚠️ Invalid senderPubRaw length for ${data.from}: ${senderPubRaw.length}. Expected 97.`);
+                            } else {
+                                const senderJWK = await crypto.subtle.exportKey(
+                                    'jwk',
+                                    await crypto.subtle.importKey('raw', senderPubRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, [])
+                                ) as JsonWebKey;
+
+                                const stranger = await db.friends.get(data.from);
+                                if (!stranger) {
+                                    await db.friends.add({
+                                        uuid: data.from,
+                                        username: `User-${data.from.slice(0, 8)}`,
+                                        isBlocked: false,
+                                        dhPublicKey: senderJWK
+                                    });
+                                } else if (!stranger.dhPublicKey) {
+                                    await db.friends.update(data.from, { dhPublicKey: senderJWK });
+                                }
+                            }
+                        } catch (e) {
+                            console.error(`❌ Failed to import/process sender public key from ${data.from}:`, e);
+                        }
                     }
 
                     if (newSharedSecret) {
@@ -167,7 +174,7 @@ export function useChatSocket(
                             if (payload.system === true && payload.type) {
                                 if (payload.type === 'FRIEND_REQUEST') {
                                     const existing = await db.friends.get(data.from);
-                                    const senderJWK = senderPubRaw ? await crypto.subtle.exportKey(
+                                    const senderJWK = (senderPubRaw && senderPubRaw.length === 97) ? await crypto.subtle.exportKey(
                                         'jwk',
                                         await crypto.subtle.importKey('raw', senderPubRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, [])
                                     ) as JsonWebKey : undefined;
@@ -391,15 +398,26 @@ export function useChatSocket(
             socket.on('presence_update', async ({ uuid, status, publicKey }: { uuid: string; status: 'online' | 'offline', publicKey?: any }) => {
                 setPresence(prev => ({ ...prev, [uuid]: status }));
                 if (publicKey && uuid !== currentUserUuid) {
+                    console.log(`👤 Presence update for ${uuid}: status=${status}, key present: ${!!publicKey}`);
                     const friend = await db.friends.get(uuid);
                     const newKeyStr = JSON.stringify(publicKey);
                     const oldKeyStr = friend?.dhPublicKey ? JSON.stringify(friend.dhPublicKey) : null;
+
                     if (newKeyStr !== oldKeyStr) {
-                        await db.friends.update(uuid, { dhPublicKey: publicKey });
-                        const account = await db.accounts.get(currentUserUuid!);
-                        if (account?.dhPrivateKey) {
-                            const newSecret = await deriveSharedSecret(account.dhPrivateKey, publicKey);
-                            await db.conversations.update(uuid, { secret: newSecret });
+                        try {
+                            if (typeof publicKey !== 'object' || Array.isArray(publicKey)) {
+                                console.warn(`⚠️ Received invalid publicKey format from ${uuid}:`, publicKey);
+                                return;
+                            }
+
+                            await db.friends.update(uuid, { dhPublicKey: publicKey });
+                            const account = await db.accounts.get(currentUserUuid!);
+                            if (account?.dhPrivateKey) {
+                                const newSecret = await deriveSharedSecret(account.dhPrivateKey, publicKey);
+                                await db.conversations.update(uuid, { secret: newSecret });
+                            }
+                        } catch (e) {
+                            console.error(`❌ Failed to process public key from ${uuid}:`, e);
                         }
                     }
                 }

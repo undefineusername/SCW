@@ -86,57 +86,87 @@ export async function importPublicKeyFromRaw(raw: Uint8Array): Promise<JsonWebKe
 }
 
 async function startDerive(privateKeyJwk: JsonWebKey, publicKey: CryptoKey): Promise<string> {
-    const privateKey = await crypto.subtle.importKey(
-        "jwk",
-        privateKeyJwk,
-        ECDH_ALGO,
-        false,
-        ["deriveBits"]
-    );
+    if (!privateKeyJwk || typeof privateKeyJwk !== 'object' || Array.isArray(privateKeyJwk)) {
+        console.error("❌ Invalid privateKeyJwk passed to startDerive:", privateKeyJwk);
+        throw new Error("Invalid privateKeyJwk: must be a JWK object");
+    }
 
-    const sharedBits = await crypto.subtle.deriveBits(
-        {
-            name: "ECDH",
-            public: publicKey
-        },
-        privateKey,
-        384
-    );
+    try {
+        const privateKey = await crypto.subtle.importKey(
+            "jwk",
+            privateKeyJwk,
+            ECDH_ALGO,
+            false,
+            ["deriveBits"]
+        );
 
-    const hashBuffer = await crypto.subtle.digest("SHA-256", sharedBits);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    // Provide a safer Base64 string (URL safe not strictly needed but good practice, here we stick to standard)
-    const hashString = btoa(String.fromCharCode.apply(null, hashArray));
+        const sharedBits = await crypto.subtle.deriveBits(
+            {
+                name: "ECDH",
+                public: publicKey
+            },
+            privateKey,
+            384
+        );
 
-    return hashString;
+        const hashBuffer = await crypto.subtle.digest("SHA-256", sharedBits);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        // Provide a safer Base64 string (URL safe not strictly needed but good practice, here we stick to standard)
+        const hashString = btoa(String.fromCharCode.apply(null, hashArray));
+
+        return hashString;
+    } catch (err) {
+        console.error("❌ Failed in startDerive (importKey or deriveBits):", err);
+        throw err;
+    }
 }
 
 export async function deriveSharedSecret(
     privateKeyJwk: JsonWebKey,
     publicKeyJwk: JsonWebKey
 ): Promise<string> {
-    const publicKey = await crypto.subtle.importKey(
-        "jwk",
-        publicKeyJwk,
-        ECDH_ALGO,
-        false,
-        []
-    );
-    return startDerive(privateKeyJwk, publicKey);
+    if (!publicKeyJwk || typeof publicKeyJwk !== 'object' || Array.isArray(publicKeyJwk)) {
+        console.error("❌ Invalid publicKeyJwk passed to deriveSharedSecret:", publicKeyJwk);
+        throw new Error("Invalid publicKeyJwk: must be a JWK object");
+    }
+
+    try {
+        const publicKey = await crypto.subtle.importKey(
+            "jwk",
+            publicKeyJwk,
+            ECDH_ALGO,
+            false,
+            []
+        );
+        return startDerive(privateKeyJwk, publicKey);
+    } catch (err) {
+        console.error("❌ Failed to import public key from JWK:", err);
+        throw err;
+    }
 }
 
 export async function deriveSharedSecretFromRaw(
     privateKeyJwk: JsonWebKey,
     publicKeyRaw: Uint8Array
 ): Promise<string> {
-    const publicKey = await crypto.subtle.importKey(
-        "raw",
-        publicKeyRaw as any,
-        ECDH_ALGO,
-        false,
-        []
-    );
-    return startDerive(privateKeyJwk, publicKey);
+    if (!publicKeyRaw || !((publicKeyRaw as any) instanceof Uint8Array || (publicKeyRaw as any) instanceof ArrayBuffer)) {
+        console.error("❌ Invalid publicKeyRaw passed to deriveSharedSecretFromRaw:", publicKeyRaw);
+        throw new Error("Invalid publicKeyRaw: must be Uint8Array or ArrayBuffer");
+    }
+
+    try {
+        const publicKey = await crypto.subtle.importKey(
+            "raw",
+            publicKeyRaw as any,
+            ECDH_ALGO,
+            false,
+            []
+        );
+        return startDerive(privateKeyJwk, publicKey);
+    } catch (err) {
+        console.error("❌ Failed to import public key from raw:", err);
+        throw err;
+    }
 }
 
 // --------------------------------------------

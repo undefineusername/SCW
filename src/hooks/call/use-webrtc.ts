@@ -264,13 +264,31 @@ export function useWebRTC(currentUserUuid: string | null) {
         setIsCallActive(true);
 
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: true,
-                video: type === 'video'
-            });
+            let stream: MediaStream;
+            try {
+                // Try to get both if video is requested
+                stream = await navigator.mediaDevices.getUserMedia({
+                    audio: true,
+                    video: type === 'video'
+                });
+                setIsCameraOn(type === 'video');
+            } catch (err) {
+                console.warn("Failed to get requested media, trying fallback...", err);
+                if (type === 'video') {
+                    // Fallback to audio only if video failed
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        audio: true,
+                        video: false
+                    });
+                    setIsCameraOn(false);
+                } else {
+                    // If audio also fails, throw
+                    throw err;
+                }
+            }
+
             localStreamRef.current = stream;
             setLocalStream(stream);
-            setIsCameraOn(type === 'video');
 
             // Listen for signals
             getSocket().on('signal', handleSignal);
@@ -281,14 +299,10 @@ export function useWebRTC(currentUserUuid: string | null) {
             getSocket().emit('join_call', { groupId });
 
             // Note: The server sends 'call_participants_list' in response.
-            // We need to handle that to connect to existing users.
             getSocket().once('call_participants_list', async ({ participants }: { participants: string[] }) => {
                 console.log("Participants in call:", participants);
                 for (const uuid of participants) {
                     if (uuid === currentUserUuid) continue;
-                    // Decide who calls whom based on UUID sort to avoid dual-offers (Glare)
-                    // Implementation: The 'Impolite' peer (Lower UUID) creates the offer.
-                    // The 'Polite' peer (Higher UUID) waits for the offer.
                     if (currentUserUuid! < uuid) {
                         const pc = createPeerConnection(uuid, false);
                         const offer = await pc.createOffer();
@@ -301,6 +315,7 @@ export function useWebRTC(currentUserUuid: string | null) {
         } catch (err) {
             console.error("Failed to join call:", err);
             cleanup();
+            // Optional: Alert user? For now just log.
         }
     }, [cleanup, currentUserUuid, createPeerConnection, handleSignal]);
 
