@@ -14,9 +14,9 @@ import { getServerTime } from '@/lib/time'
 import { motion } from 'framer-motion'
 import Navigation from '@/components/navigation'
 import FriendsList from '@/components/friends-list'
-import { useGroupCall } from '@/hooks/use-group-call'
-import type { CallType } from '@/hooks/use-group-call'
-import GroupCallOverlay from '@/components/group-call-overlay'
+import { useCall } from '@/hooks/use-call'
+import type { CallType } from '@/hooks/use-call'
+import CallOverlay from '@/components/call/call-overlay'
 import IncomingCallDialog from '@/components/incoming-call-dialog'
 
 type Theme = 'purple' | 'blue' | 'green' | 'orange' | 'pink'
@@ -145,7 +145,7 @@ export default function App() {
     toggleCamera,
     isLocalSpeaking,
     initiateConnections
-  } = useGroupCall(currentUser?.uuid || null, handleWebRTCSignal);
+  } = useCall(currentUser?.uuid || null, handleWebRTCSignal);
 
   const [incomingCall, setIncomingCall] = useState<{ from: string; type: CallType; signal: any } | null>(null);
 
@@ -715,8 +715,8 @@ export default function App() {
         onUpdateAvatar={handleUpdateAvatar}
       />
 
-      {/* Voice Call UI */}
-      <GroupCallOverlay
+      {/* Call UI */}
+      <CallOverlay
         isOpen={callState === 'in-call'}
         callType={callType}
         peers={peers}

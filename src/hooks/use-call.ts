@@ -11,7 +11,7 @@ interface PeerConnection {
     dataArray?: Uint8Array;
 }
 
-export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: string, signal: any) => void) {
+export function useCall(currentUserUuid: string | null, sendSignal: (to: string, signal: any) => void) {
     const [callState, setCallState] = useState<CallState>('idle');
     const [callType, setCallType] = useState<CallType>('video');
     const [peers, setPeers] = useState<Record<string, { stream: MediaStream | null; isSpeaking: boolean }>>({});
@@ -262,6 +262,10 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
             if (videoTrack) {
                 videoTrack.enabled = !videoTrack.enabled;
                 setIsCameraOn(videoTrack.enabled);
+                if (videoTrack.enabled) {
+                    setCallType('video');
+                    activeCallTypeRef.current = 'video';
+                }
             } else if (!isCameraOn) {
                 try {
                     const freshStream = await navigator.mediaDevices.getUserMedia({
@@ -281,6 +285,7 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
 
                     setIsCameraOn(true);
                     setCallType('video');
+                    activeCallTypeRef.current = 'video';
                 } catch (err) {
                     console.error('Failed to enable camera:', err);
                 }
@@ -289,6 +294,22 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
     }, [isCameraOn]);
 
     const initiateConnections = useCallback(async (participants: string[]) => {
+        // 1. Remove peers not in participants list
+        const activeParticipants = new Set(participants);
+        pcMap.current.forEach((_, uuid) => {
+            if (!activeParticipants.has(uuid) && uuid !== currentUserUuid) {
+                const pc = pcMap.current.get(uuid)?.pc;
+                if (pc) pc.close();
+                pcMap.current.delete(uuid);
+                setPeers(prev => {
+                    const next = { ...prev };
+                    delete next[uuid];
+                    return next;
+                });
+            }
+        });
+
+        // 2. Add new peers
         for (const uuid of participants) {
             if (uuid === currentUserUuid || pcMap.current.has(uuid)) continue;
             const pc = createPeerConnection(uuid);
@@ -316,4 +337,3 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
         initiateConnections
     };
 }
-
