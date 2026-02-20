@@ -10,7 +10,7 @@ export const getSocket = () => {
         socket = io(SOCKET_URL, {
             autoConnect: false,
             reconnection: true,
-            // transports: ['websocket'] // Allow default (polling + websocket) for better connectivity
+            transports: ['websocket'] // Force websocket to avoid polling 400 errors on Railway
         });
     }
     return socket;

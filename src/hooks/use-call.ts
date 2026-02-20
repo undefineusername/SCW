@@ -188,16 +188,26 @@ export function useCall(currentUserUuid: string | null, sendSignal: (to: string,
                     setIsCameraOn(true);
                 } catch (err) {
                     console.warn('Camera failed/denied, falling back to audio-only:', err);
+                    alert("Unable to access camera. Starting voice call instead.");
                     stream = await navigator.mediaDevices.getUserMedia({
                         audio: { echoCancellation: true, noiseSuppression: true }
                     });
                     setIsCameraOn(false);
+                    setCallType('voice');
+                    activeCallTypeRef.current = 'voice';
                 }
             } else {
-                stream = await navigator.mediaDevices.getUserMedia({
-                    audio: { echoCancellation: true, noiseSuppression: true }
-                });
-                setIsCameraOn(false);
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        audio: { echoCancellation: true, noiseSuppression: true }
+                    });
+                    setIsCameraOn(false);
+                } catch (err) {
+                    console.error('Microphone failed/denied:', err);
+                    alert("Unable to access microphone. Call cannot be started.");
+                    cleanup();
+                    return;
+                }
             }
 
             localStreamRef.current = stream;
