@@ -3,6 +3,7 @@
 import { PhoneOff, Mic, MicOff, Video, VideoOff, User } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useEffect, useState, useRef } from 'react';
+import AudioStream from './audio-stream';
 
 interface DirectCallViewProps {
     peerData: { stream: MediaStream | null; username?: string; avatar?: string; isSpeaking?: boolean };
@@ -160,12 +161,7 @@ export default function DirectCallView({
             </div>
 
             {/* Audio for remote */}
-            {peerData.stream && (
-                <audio
-                    autoPlay
-                    ref={(el) => { if (el) el.srcObject = peerData.stream!; }}
-                />
-            )}
+            <AudioStream stream={peerData.stream} />
         </div>
     );
 }

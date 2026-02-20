@@ -3,6 +3,7 @@
 import { MicOff, User } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useEffect, useState, useRef } from 'react';
+import AudioStream from './audio-stream';
 
 interface ParticipantCardProps {
     username: string;
@@ -124,13 +125,7 @@ export default function ParticipantCard({
 
             {/* Audio for remote peers - Always render to ensure audio plays even if video is off */}
             {!isLocal && stream && (
-                <audio
-                    autoPlay
-                    ref={(el) => {
-                        if (el && stream) el.srcObject = stream;
-                    }}
-                    className="hidden"
-                />
+                <AudioStream stream={stream} />
             )}
         </div>
     );
