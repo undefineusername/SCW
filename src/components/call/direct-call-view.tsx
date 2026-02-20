@@ -5,7 +5,6 @@ import { motion } from 'framer-motion';
 import { useEffect, useState, useRef } from 'react';
 
 interface DirectCallViewProps {
-    peerUuid: string;
     peerData: { stream: MediaStream | null; username?: string; avatar?: string; isSpeaking?: boolean };
     localStream: MediaStream | null;
     isMuted: boolean;
