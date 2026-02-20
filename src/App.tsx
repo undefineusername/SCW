@@ -506,14 +506,12 @@ export default function App() {
               isGroup={conversations.find((c: any) => c.id === selectedConversation)?.isGroup}
               participants={(conversations.find((c: any) => c.id === selectedConversation)?.participants || []) as any[]}
               onVoiceCall={async () => {
-                const group = conversations.find((c: any) => c.id === selectedConversation);
-                if (group) {
+                if (selectedConversation) {
                   await joinCall(selectedConversation, 'voice');
                 }
               }}
               onVideoCall={async () => {
-                const group = conversations.find((c: any) => c.id === selectedConversation);
-                if (group) {
+                if (selectedConversation) {
                   await joinCall(selectedConversation, 'video');
                 }
               }}

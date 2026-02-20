@@ -299,6 +299,7 @@ export function useWebRTC(currentUserUuid: string | null) {
 
     // --- Join Call ---
     const joinCall = useCallback(async (groupId: string, type: CallType = 'video') => {
+        console.log(`📡 [WebRTC] joinCall: groupId=${groupId}, type=${type}`);
         cleanup();
         activeGroupIdRef.current = groupId;
         setIsCallActive(true);
@@ -306,14 +307,20 @@ export function useWebRTC(currentUserUuid: string | null) {
         try {
             let stream: MediaStream;
             try {
+                console.log(`🎥 Requesting media: audio=true, video=${type === 'video'}`);
                 // Try to get both if video is requested
                 stream = await navigator.mediaDevices.getUserMedia({
                     audio: true,
-                    video: type === 'video'
+                    video: type === 'video' ? {
+                        facingMode: "user",
+                        width: { ideal: 1280, max: 1920 },
+                        height: { ideal: 720, max: 1080 }
+                    } : false
                 });
+                console.log("✅ Media stream obtained");
                 setIsCameraOn(type === 'video');
             } catch (err) {
-                console.warn("Failed to get requested media, trying fallback...", err);
+                console.warn("⚠️ Failed to get requested media, trying fallback...", err);
                 if (type === 'video') {
                     // Fallback to audio only if video failed
                     stream = await navigator.mediaDevices.getUserMedia({
