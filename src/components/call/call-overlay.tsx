@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useState } from 'react';
-import type { CallType } from '@/hooks/use-call';
+import type { CallType } from '@/hooks/call/use-call';
 import DirectCallView from './direct-call-view';
 import GroupCallView from './group-call-view';
 
