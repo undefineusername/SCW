@@ -10,12 +10,12 @@ import { useChatActions } from '@/hooks/chat/use-chat-actions'
 import { db } from '@/lib/db'
 import { decryptMessage, deriveKeyFromSecret } from '@/lib/crypto'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { getServerTime } from '@/lib/time'
 import { motion } from 'framer-motion'
 import Navigation from '@/components/navigation'
 import FriendsList from '@/components/friends-list'
-import { useVoiceCall } from '@/hooks/use-voice-call'
-import IncomingCallDialog from '@/components/incoming-call-dialog'
-import VoiceCallOverlay from '@/components/voice-call-overlay'
+import { useGroupCall } from '@/hooks/use-group-call'
+import GroupCallOverlay from '@/components/group-call-overlay'
 
 type Theme = 'purple' | 'blue' | 'green' | 'orange' | 'pink'
 
@@ -119,33 +119,36 @@ export default function App() {
     }
   };
 
-  const { sendMessage: dispatchMessage } = useChatActions(currentUser?.uuid || null, currentUser?.key || null, currentUser);
+  const { sendMessage: dispatchMessageOriginal } = useChatActions(currentUser?.uuid || null, currentUser?.key || null, currentUser);
 
   const handleWebRTCSignal = useCallback((to: string, signal: any) => {
-    dispatchMessage(to, JSON.stringify({
+    dispatchMessageOriginal(to, JSON.stringify({
       system: true,
       type: 'WEBRTC_SIGNAL',
-      signal
+      signal: { ...signal, from: currentUser?.uuid }
     }));
-  }, [dispatchMessage]);
+  }, [dispatchMessageOriginal, currentUser?.uuid]);
 
   const {
     callState,
-    remotePeerUuid,
-    remoteStream,
+    peers,
+    localStream,
     isMuted: isCallMuted,
-    startCall,
-    acceptCall,
-    rejectCall,
-    endCall,
+    isCameraOn,
+    joinCall,
+    leaveCall,
     handleSignal,
-    toggleMute
-  } = useVoiceCall(currentUser?.uuid || null, handleWebRTCSignal);
+    toggleMute,
+    toggleCamera,
+    isLocalSpeaking,
+    initiateConnections
+  } = useGroupCall(currentUser?.uuid || null, handleWebRTCSignal);
 
   const { isConnected, sendMessage, presence } = useChat(
     currentUser,
     selectedConversation,
-    handleSignal
+    (from, signal) => handleSignal({ ...signal, from }),
+    (participants) => initiateConnections(participants)
   );
 
   const conversations = useLiveQuery(() => db.conversations.toArray()) || [];
@@ -245,7 +248,7 @@ export default function App() {
         username: `User-${targetId.slice(0, 8)}`,
         avatar: '👤',
         lastMessage: 'Encryption tunnel ready',
-        lastTimestamp: new Date(),
+        lastTimestamp: getServerTime(),
         unreadCount: 0
       });
     }
@@ -501,7 +504,15 @@ export default function App() {
               isOnline={presence[selectedConversation] === 'online'}
               isGroup={conversations.find((c: any) => c.id === selectedConversation)?.isGroup}
               participants={(conversations.find((c: any) => c.id === selectedConversation)?.participants || []) as any[]}
-              onVoiceCall={() => startCall(selectedConversation)}
+              onVoiceCall={() => {
+                const group = conversations.find((c: any) => c.id === selectedConversation);
+                if (group) {
+                  const participantUuids = group.isGroup
+                    ? (group.participants || []).map((p: any) => p.uuid)
+                    : [selectedConversation];
+                  joinCall(selectedConversation, participantUuids);
+                }
+              }}
             />
 
             {/* Stranger Banner (O/X) */}
@@ -680,24 +691,18 @@ export default function App() {
       />
 
       {/* Voice Call UI */}
-      <IncomingCallDialog
-        isOpen={callState === 'incoming'}
-        callerName={friends.find(f => f.uuid === remotePeerUuid)?.username || conversations.find(c => c.id === remotePeerUuid)?.username || 'Unknown'}
-        callerAvatar={friends.find(f => f.uuid === remotePeerUuid)?.avatar || conversations.find(c => c.id === remotePeerUuid)?.avatar}
-        onAccept={acceptCall}
-        onReject={rejectCall}
-        isDark={isDark}
-      />
-
-      <VoiceCallOverlay
-        callState={callState}
-        remoteName={friends.find(f => f.uuid === remotePeerUuid)?.username || conversations.find(c => c.id === remotePeerUuid)?.username || 'Unknown'}
-        remoteAvatar={friends.find(f => f.uuid === remotePeerUuid)?.avatar || conversations.find(c => c.id === remotePeerUuid)?.avatar}
+      <GroupCallOverlay
+        isOpen={callState === 'in-call'}
+        peers={peers}
+        localStream={localStream}
         isMuted={isCallMuted}
+        isCameraOn={isCameraOn}
+        isLocalSpeaking={isLocalSpeaking}
         onToggleMute={toggleMute}
-        onEndCall={endCall}
+        onToggleCamera={toggleCamera}
+        onLeave={leaveCall}
         isDark={isDark}
-        remoteStream={remoteStream}
+        groupName={conversations.find((c: any) => c.id === selectedConversation)?.username || 'Group Call'}
       />
     </div >
   )

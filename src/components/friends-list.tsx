@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { getSocket } from '@/lib/socket';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { deriveSharedSecret } from '@/lib/crypto';
+import { getServerTime } from '@/lib/time';
 import AddFriendModal from './add-friend-modal';
 import CreateGroupModal from './create-group-modal';
 
@@ -131,7 +132,7 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
                 username: username,
                 avatar: friendEntry?.avatar || '👤',
                 lastMessage: 'Friend request accepted',
-                lastTimestamp: new Date(),
+                lastTimestamp: getServerTime(),
                 unreadCount: 0,
                 secret: sharedSecret
             });
@@ -174,7 +175,7 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
             username: name,
             avatar: '👥',
             lastMessage: 'Group created',
-            lastTimestamp: new Date(),
+            lastTimestamp: getServerTime(),
             unreadCount: 0,
             isGroup: true,
             participants: [...participants, currentUser.uuid]

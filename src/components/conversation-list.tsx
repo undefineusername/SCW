@@ -1,4 +1,5 @@
 'use client';
+import { getServerTime } from '@/lib/time';
 
 interface Participant {
   uuid: string
@@ -127,7 +128,7 @@ export default function ConversationList({
   const nameSizeClass = fontSize === 'sm' ? 'text-[13px]' : fontSize === 'lg' ? 'text-base' : 'text-sm'
 
   const ts = conversation.lastTimestamp
-  const now = new Date()
+  const now = getServerTime()
   let timeString = ''
   if (ts instanceof Date && !isNaN(ts.getTime())) {
     const isToday = ts.toDateString() === now.toDateString()

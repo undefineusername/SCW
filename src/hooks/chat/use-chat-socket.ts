@@ -8,22 +8,27 @@ import {
     deriveSharedSecret
 } from '@/lib/crypto';
 import { DECRYPTION_ERROR_MSG, isSystemMessage } from './chat-utils';
+import { updateServerTimeOffset, getServerTime } from '@/lib/time';
 
 export function useChatSocket(
     user: { uuid: string; key: Uint8Array; username: string; avatar?: string; salt?: string; kdfParams?: any } | null,
     selectedConversationUuid: string | null,
     sendMessage: (toUuid: string, text: string) => Promise<string | undefined>,
     setPresence: React.Dispatch<React.SetStateAction<Record<string, "online" | "offline">>>,
-    onWebRTCSignal?: (from: string, signal: any) => void
+    onWebRTCSignal?: (from: string, signal: any) => void,
+    onCallParticipantsList?: (participants: string[]) => void
 ) {
     const [isConnected, setIsConnected] = useState(false);
     const currentUserUuid = user?.uuid || null;
     const encryptionKey = user?.key || null;
 
     const onWebRTCSignalRef = useRef(onWebRTCSignal);
+    const onCallParticipantsListRef = useRef(onCallParticipantsList);
+
     useEffect(() => {
         onWebRTCSignalRef.current = onWebRTCSignal;
-    }, [onWebRTCSignal]);
+        onCallParticipantsListRef.current = onCallParticipantsList;
+    }, [onWebRTCSignal, onCallParticipantsList]);
 
     useEffect(() => {
         if (!currentUserUuid || !encryptionKey) return;
@@ -44,6 +49,12 @@ export function useChatSocket(
 
             const onRawPush = async (data: { from: string; to: string; payload: any; timestamp: number; type?: string; msgId?: string }) => {
                 const isEcho = data.type === 'echo' || data.from === currentUserUuid;
+
+                // Sync server time offset
+                if (data.timestamp) {
+                    updateServerTimeOffset(data.timestamp);
+                }
+
                 try {
                     let fullPayload: Uint8Array;
                     if (data.payload instanceof Uint8Array) {
@@ -136,7 +147,7 @@ export function useChatSocket(
                                 username: friendEntry?.username || `User-${data.from.slice(0, 8)}`,
                                 avatar: '👤',
                                 lastMessage: '',
-                                lastTimestamp: new Date(),
+                                lastTimestamp: getServerTime(),
                                 unreadCount: 0,
                                 secret: newSharedSecret
                             });
@@ -191,7 +202,7 @@ export function useChatSocket(
                                                 username: friendName,
                                                 avatar: payload.avatar || '👤',
                                                 lastMessage: '',
-                                                lastTimestamp: new Date(),
+                                                lastTimestamp: getServerTime(),
                                                 unreadCount: 0,
                                                 secret: newSharedSecret
                                             });
@@ -219,7 +230,7 @@ export function useChatSocket(
                                                 username: resolvedUsername,
                                                 avatar: payload.avatar || '👤',
                                                 lastMessage: 'Friend Request Accepted',
-                                                lastTimestamp: new Date(),
+                                                lastTimestamp: getServerTime(),
                                                 unreadCount: 0,
                                                 secret: newSharedSecret
                                             });
@@ -228,7 +239,7 @@ export function useChatSocket(
                                                 secret: newSharedSecret,
                                                 avatar: payload.avatar || existingConv.avatar,
                                                 lastMessage: 'Friend Request Accepted',
-                                                lastTimestamp: new Date()
+                                                lastTimestamp: getServerTime()
                                             });
                                         }
                                     }
@@ -366,6 +377,12 @@ export function useChatSocket(
             socket.on('dispatch_status', onDispatchStatus);
             socket.on('msg_ack_push', onReadReceipts);
 
+            socket.on('call_participants_list', ({ participants }: { participants: string[] }) => {
+                if (onCallParticipantsListRef.current) {
+                    onCallParticipantsListRef.current(participants);
+                }
+            });
+
             socket.on('presence_update', async ({ uuid, status, publicKey }: { uuid: string; status: 'online' | 'offline', publicKey?: any }) => {
                 setPresence(prev => ({ ...prev, [uuid]: status }));
                 if (publicKey && uuid !== currentUserUuid) {
@@ -390,6 +407,7 @@ export function useChatSocket(
                 socket.off('queue_flush', onQueueFlush);
                 socket.off('dispatch_status', onDispatchStatus);
                 socket.off('msg_ack_push', onReadReceipts);
+                socket.off('call_participants_list');
                 socket.off('presence_update');
             };
         };

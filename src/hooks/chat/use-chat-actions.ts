@@ -7,6 +7,7 @@ import {
     deriveSharedSecret,
     exportPublicKeyToRaw
 } from '@/lib/crypto';
+import { getServerTime } from '@/lib/time';
 
 export function useChatActions(
     currentUserUuid: string | null,
@@ -22,7 +23,7 @@ export function useChatActions(
 
         const socket = getSocket();
         const msgId = crypto.randomUUID();
-        const timestamp = new Date().toISOString();
+        const timestamp = getServerTime().toISOString();
 
         try {
             const conv = await db.conversations.get(toUuid);
@@ -123,18 +124,16 @@ export function useChatActions(
                     from: currentUserUuid,
                     to: toUuid,
                     text,
-                    replyToId: replyTo?.id,
-                    replyToText: replyTo?.text,
                     replyToSender: replyTo?.sender,
                     groupId: isGroup ? toUuid : undefined,
-                    timestamp: new Date(),
+                    timestamp: getServerTime(),
                     status: 'sending'
                 });
 
                 if (toUuid !== currentUserUuid) {
                     await db.conversations.update(toUuid, {
                         lastMessage: text,
-                        lastTimestamp: new Date()
+                        lastTimestamp: getServerTime()
                     });
                 }
             }
