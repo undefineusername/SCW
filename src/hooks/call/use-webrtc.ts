@@ -257,6 +257,26 @@ export function useWebRTC(currentUserUuid: string | null) {
 
     }, [currentUserUuid, createPeerConnection]);
 
+    // --- Global Socket Listeners ---
+    useEffect(() => {
+        if (!currentUserUuid) return;
+        const socket = getSocket();
+
+        const onSignal = (data: any) => handleSignal(data);
+        const onUserJoined = (data: any) => handleSignal({ ...data, type: 'call_user_joined' });
+        const onUserLeft = (data: any) => handleSignal({ ...data, type: 'call_user_left' });
+
+        socket.on('signal', onSignal);
+        socket.on('call_user_joined', onUserJoined);
+        socket.on('call_user_left', onUserLeft);
+
+        return () => {
+            socket.off('signal', onSignal);
+            socket.off('call_user_joined', onUserJoined);
+            socket.off('call_user_left', onUserLeft);
+        };
+    }, [currentUserUuid, handleSignal]);
+
     // --- Join Call ---
     const joinCall = useCallback(async (groupId: string, type: CallType = 'video') => {
         cleanup();
@@ -290,17 +310,29 @@ export function useWebRTC(currentUserUuid: string | null) {
             localStreamRef.current = stream;
             setLocalStream(stream);
 
-            // Listen for signals
-            getSocket().on('signal', handleSignal);
-            getSocket().on('call_user_joined', (data: any) => handleSignal({ ...data, type: 'call_user_joined' }));
-            getSocket().on('call_user_left', (data: any) => handleSignal({ ...data, type: 'call_user_left' }));
-
             // Initial Join Event
             getSocket().emit('join_call', { groupId });
 
             // Note: The server sends 'call_participants_list' in response.
             getSocket().once('call_participants_list', async ({ participants }: { participants: string[] }) => {
                 console.log("Participants in call:", participants);
+
+                // If we are the only one in the call, and it might be a 1:1 call,
+                // try to "ring" the other side by sending an initial offer to the groupId.
+                if (participants.length <= 1 && groupId !== currentUserUuid) {
+                    console.log(`📡 Sending initial ring offer to ${groupId}`);
+                    const pc = createPeerConnection(groupId, false);
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    getSocket().emit('signal', {
+                        to: groupId,
+                        type: 'offer',
+                        sdp: offer,
+                        callType: type,
+                        groupId: groupId
+                    });
+                }
+
                 for (const uuid of participants) {
                     if (uuid === currentUserUuid) continue;
                     if (currentUserUuid! < uuid) {
