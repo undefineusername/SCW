@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { getSocket } from '@/lib/socket';
 
 export type CallState = 'idle' | 'in-call';
+export type CallType = 'voice' | 'video';
 
 interface PeerConnection {
     pc: RTCPeerConnection;
@@ -12,6 +13,7 @@ interface PeerConnection {
 
 export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: string, signal: any) => void) {
     const [callState, setCallState] = useState<CallState>('idle');
+    const [callType, setCallType] = useState<CallType>('video');
     const [peers, setPeers] = useState<Record<string, { stream: MediaStream | null; isSpeaking: boolean }>>({});
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
     const [isMuted, setIsMuted] = useState(false);
@@ -22,6 +24,7 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
     const localStreamRef = useRef<MediaStream | null>(null);
     const audioCtxRef = useRef<AudioContext | null>(null);
     const localAnalyserRef = useRef<AnalyserNode | null>(null);
+    const activeCallTypeRef = useRef<CallType>('video');
 
     const cleanup = useCallback(() => {
         pcMap.current.forEach(peer => {
@@ -45,12 +48,10 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
     }, []);
 
     const setBitrate = (sdp: string, bitrate: number) => {
-        // Find the video media section and insert b=AS line or modify existing fmtp
         let newSdp = sdp.replace(/a=fmtp:(\d+) (?:.*)/g, (match, _pt) => {
             return `${match};maxaveragebitrate=${bitrate * 1000}`;
         });
 
-        // Add bandwidth limit for video (b=AS:1000 for 1Mbps)
         if (newSdp.includes('m=video')) {
             newSdp = newSdp.replace(/m=video.*\r\n/g, (match) => {
                 return `${match}b=AS:${bitrate}\r\n`;
@@ -77,7 +78,6 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
             const remoteStream = event.streams[0];
             peerInfo.stream = remoteStream;
 
-            // Setup Analyser for VAD
             if (audioCtxRef.current) {
                 const source = audioCtxRef.current.createMediaStreamSource(remoteStream);
                 const analyser = audioCtxRef.current.createAnalyser();
@@ -118,15 +118,13 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
         if (callState !== 'in-call') return;
 
         const checkVAD = () => {
-            // Local VAD
             if (localAnalyserRef.current) {
                 const data = new Uint8Array(localAnalyserRef.current.frequencyBinCount);
                 localAnalyserRef.current.getByteFrequencyData(data as any);
                 const volume = data.reduce((a, b) => a + b, 0) / data.length;
-                setIsLocalSpeaking(volume > 15); // Adjust threshold
+                setIsLocalSpeaking(volume > 15);
             }
 
-            // Peers VAD
             setPeers(prev => {
                 let changed = false;
                 const next = { ...prev };
@@ -147,14 +145,11 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
 
         const interval = setInterval(checkVAD, 100);
 
-        // Visibility Change Handler - Pause video when tab is hidden
         const handleVisibilityChange = () => {
             if (document.hidden && localStreamRef.current) {
                 localStreamRef.current.getVideoTracks().forEach(track => {
                     if (track.enabled) {
                         track.enabled = false;
-                        // We don't update state here to keep UI consistent, 
-                        // just disabling track for performance/privacy
                     }
                 });
             } else if (!document.hidden && localStreamRef.current && isCameraOn) {
@@ -172,21 +167,29 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
         };
     }, [callState, isCameraOn]);
 
-    const joinCall = useCallback(async (groupId: string, _participantUuids: string[]) => {
+    const joinCall = useCallback(async (groupId: string, type: CallType = 'video') => {
         try {
             cleanup();
             setCallState('in-call');
+            setCallType(type);
+            activeCallTypeRef.current = type;
 
             let stream: MediaStream;
-            try {
-                // Try to get both video and audio
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: { width: 640, height: 480, frameRate: 24 },
-                    audio: { echoCancellation: true, noiseSuppression: true }
-                });
-                setIsCameraOn(true);
-            } catch (err) {
-                console.warn('Camera failed/denied, falling back to audio-only:', err);
+            if (type === 'video') {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: { width: 640, height: 480, frameRate: 24 },
+                        audio: { echoCancellation: true, noiseSuppression: true }
+                    });
+                    setIsCameraOn(true);
+                } catch (err) {
+                    console.warn('Camera failed/denied, falling back to audio-only:', err);
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        audio: { echoCancellation: true, noiseSuppression: true }
+                    });
+                    setIsCameraOn(false);
+                }
+            } else {
                 stream = await navigator.mediaDevices.getUserMedia({
                     audio: { echoCancellation: true, noiseSuppression: true }
                 });
@@ -196,7 +199,6 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
             localStreamRef.current = stream;
             setLocalStream(stream);
 
-            // Setup AudioContext for VAD
             const ctx = new AudioContext();
             audioCtxRef.current = ctx;
             const source = ctx.createMediaStreamSource(stream);
@@ -224,13 +226,15 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
                 if (!pc) pc = createPeerConnection(from);
                 await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp!));
                 const answer = await pc.createAnswer();
-                answer.sdp = setBitrate(answer.sdp!, 1000); // Limit to 1000kbps (1Mbps)
+                answer.sdp = setBitrate(answer.sdp!, 1000);
                 await pc.setLocalDescription(answer);
                 sendSignal(from, { type: 'answer', sdp: answer, from: currentUserUuid });
             } else if (signal.type === 'answer') {
                 if (pc) await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp!));
             } else if (signal.type === 'candidate') {
                 if (pc) await pc.addIceCandidate(new RTCIceCandidate(signal.candidate!));
+            } else if (signal.type === 'reject') {
+                cleanup();
             }
         } catch (err) {
             console.error('WebRTC Signaling Error:', err);
@@ -238,7 +242,7 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
     }, [currentUserUuid, createPeerConnection, sendSignal]);
 
     const leaveCall = useCallback(() => {
-        getSocket().emit('leave_call', { groupId: 'current' }); // Backend clears all calls on disconnect/explicit leave
+        getSocket().emit('leave_call', { groupId: 'current' });
         cleanup();
     }, [cleanup]);
 
@@ -259,7 +263,6 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
                 videoTrack.enabled = !videoTrack.enabled;
                 setIsCameraOn(videoTrack.enabled);
             } else if (!isCameraOn) {
-                // If no video track exists, try to add one (e.g. if user previously denied permission but now allows)
                 try {
                     const freshStream = await navigator.mediaDevices.getUserMedia({
                         video: { width: 640, height: 480, frameRate: 24 }
@@ -267,12 +270,17 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
                     const freshTrack = freshStream.getVideoTracks()[0];
                     localStreamRef.current.addTrack(freshTrack);
 
-                    // Update all current PeerConnections with the new track
                     pcMap.current.forEach(peer => {
-                        peer.pc.addTrack(freshTrack, localStreamRef.current!);
+                        const sender = peer.pc.getSenders().find(s => s.track?.kind === 'video');
+                        if (sender) {
+                            sender.replaceTrack(freshTrack);
+                        } else {
+                            peer.pc.addTrack(freshTrack, localStreamRef.current!);
+                        }
                     });
 
                     setIsCameraOn(true);
+                    setCallType('video');
                 } catch (err) {
                     console.error('Failed to enable camera:', err);
                 }
@@ -287,12 +295,14 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
             const offer = await pc.createOffer();
             offer.sdp = setBitrate(offer.sdp!, 1000);
             await pc.setLocalDescription(offer);
-            sendSignal(uuid, { type: 'offer', sdp: offer, from: currentUserUuid });
+            // We include callType in the offer to let others know
+            sendSignal(uuid, { type: 'offer', sdp: offer, from: currentUserUuid, callType: activeCallTypeRef.current });
         }
     }, [currentUserUuid, createPeerConnection, sendSignal]);
 
     return {
         callState,
+        callType,
         peers,
         localStream,
         isMuted,
@@ -306,3 +316,4 @@ export function useGroupCall(currentUserUuid: string | null, sendSignal: (to: st
         initiateConnections
     };
 }
+

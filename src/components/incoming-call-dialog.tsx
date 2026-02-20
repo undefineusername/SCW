@@ -1,6 +1,6 @@
 'use client';
 
-import { Phone, PhoneOff } from 'lucide-react';
+import { Phone, PhoneOff, Video } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface IncomingCallDialogProps {
@@ -10,6 +10,7 @@ interface IncomingCallDialogProps {
     onAccept: () => void;
     onReject: () => void;
     isDark: boolean;
+    callType: 'voice' | 'video';
 }
 
 export default function IncomingCallDialog({
@@ -18,7 +19,8 @@ export default function IncomingCallDialog({
     callerAvatar,
     onAccept,
     onReject,
-    isDark
+    isDark,
+    callType
 }: IncomingCallDialogProps) {
     return (
         <AnimatePresence>
@@ -44,21 +46,25 @@ export default function IncomingCallDialog({
 
                             <div className="space-y-1">
                                 <h3 className="text-xl font-bold">{callerName}</h3>
-                                <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Incoming Voice Call...</p>
+                                <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                                    Incoming {callType === 'video' ? 'Video' : 'Voice'} Call...
+                                </p>
                             </div>
 
                             <div className="flex gap-8 pt-4">
                                 <button
                                     onClick={onReject}
                                     className="w-16 h-16 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 active:scale-90 transition-all shadow-lg shadow-red-500/30"
+                                    title="Reject"
                                 >
                                     <PhoneOff size={28} />
                                 </button>
                                 <button
                                     onClick={onAccept}
                                     className="w-16 h-16 rounded-full bg-green-500 text-white flex items-center justify-center hover:bg-green-600 active:scale-90 transition-all shadow-lg shadow-green-500/30"
+                                    title="Accept"
                                 >
-                                    <Phone size={28} />
+                                    {callType === 'video' ? <Video size={28} /> : <Phone size={28} />}
                                 </button>
                             </div>
                         </div>

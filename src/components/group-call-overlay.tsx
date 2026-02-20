@@ -3,9 +3,11 @@
 import { PhoneOff, Mic, MicOff, User, Video, VideoOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useState, useRef } from 'react';
+import type { CallType } from '@/hooks/use-group-call';
 
 interface GroupCallOverlayProps {
     isOpen: boolean;
+    callType: CallType;
     peers: Record<string, { stream: MediaStream | null; username?: string; avatar?: string; isSpeaking?: boolean }>;
     localStream: MediaStream | null;
     isMuted: boolean;
@@ -20,6 +22,7 @@ interface GroupCallOverlayProps {
 
 export default function GroupCallOverlay({
     isOpen,
+    callType,
     peers,
     localStream,
     isMuted,
@@ -52,6 +55,7 @@ export default function GroupCallOverlay({
     };
 
     const participantCount = Object.keys(peers).length + (localStream ? 1 : 0);
+    const isVoiceCall = callType === 'voice';
 
     return (
         <AnimatePresence>
@@ -65,7 +69,12 @@ export default function GroupCallOverlay({
                     {/* Header */}
                     <div className="p-6 flex justify-between items-center">
                         <div>
-                            <h2 className="text-xl font-bold">{groupName}</h2>
+                            <div className="flex items-center gap-3">
+                                <h2 className="text-xl font-bold">{groupName}</h2>
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest ${isVoiceCall ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-purple-500/20 text-purple-400 border border-purple-500/30'}`}>
+                                    {isVoiceCall ? 'Voice' : 'Video'} Call
+                                </span>
+                            </div>
                             <p className="text-sm text-gray-400">
                                 {participantCount} Participants • {formatDuration(duration)}
                             </p>
@@ -78,8 +87,8 @@ export default function GroupCallOverlay({
                         </button>
                     </div>
 
-                    {/* Participants Grid */}
-                    <div className="flex-1 p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 overflow-y-auto content-start">
+                    {/* Participants Content */}
+                    <div className={`flex-1 p-6 overflow-y-auto ${isVoiceCall ? 'flex flex-wrap items-center justify-center gap-12' : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 content-start'}`}>
                         {/* Local Participant */}
                         <ParticipantCard
                             username="You"
@@ -89,6 +98,7 @@ export default function GroupCallOverlay({
                             isSpeaking={isLocalSpeaking}
                             isDark={isDark}
                             stream={localStream}
+                            isVoiceCall={isVoiceCall}
                         />
 
                         {/* Remote Participants */}
@@ -101,6 +111,7 @@ export default function GroupCallOverlay({
                                 stream={peer.stream}
                                 isSpeaking={peer.isSpeaking}
                                 isDark={isDark}
+                                isVoiceCall={isVoiceCall}
                             />
                         ))}
                     </div>
@@ -142,7 +153,8 @@ function ParticipantCard({
     isVideoOff,
     isSpeaking,
     isDark,
-    _uuid
+    _uuid,
+    isVoiceCall
 }: {
     username: string;
     avatar?: string;
@@ -153,6 +165,7 @@ function ParticipantCard({
     isSpeaking?: boolean;
     isDark: boolean;
     _uuid?: string;
+    isVoiceCall: boolean;
 }) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
@@ -162,7 +175,6 @@ function ParticipantCard({
             videoRef.current.srcObject = stream;
             videoRef.current.play().catch(console.error);
 
-            // Check if stream has video tracks
             const videoTrack = stream.getVideoTracks()[0];
             if (videoTrack) {
                 setHasRemoteVideo(videoTrack.enabled);
@@ -180,13 +192,12 @@ function ParticipantCard({
         }
     }, [stream]);
 
-    const showPlaceholder = isLocal ? isVideoOff : !hasRemoteVideo;
+    const showPlaceholder = isVoiceCall || (isLocal ? isVideoOff : !hasRemoteVideo);
 
     return (
         <div
             data-peer-uuid={_uuid}
-            className={`relative aspect-video rounded-3xl overflow-hidden flex flex-col items-center justify-center border transition-all duration-500 ${isSpeaking ? 'ring-4 ring-green-500 shadow-2xl shadow-green-500/40 z-10 scale-[1.02]' : 'z-0'
-                } ${isDark ? 'bg-gray-900 border-gray-800' : 'bg-gray-800 border-gray-700'
+            className={`relative overflow-hidden flex flex-col items-center justify-center transition-all duration-500 ${isSpeaking ? 'ring-4 ring-green-500 shadow-2xl shadow-green-500/40 z-10 scale-[1.05]' : 'z-0'} ${isVoiceCall ? 'w-48 h-48 rounded-full border-2' : 'aspect-video rounded-3xl border'} ${isDark ? 'bg-gray-900 border-gray-800' : 'bg-gray-800 border-gray-700'
                 }`}>
 
             {/* Video Background */}
@@ -202,13 +213,12 @@ function ParticipantCard({
 
             {/* Placeholder / Avatar */}
             {showPlaceholder && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center space-y-4 bg-gray-900/50 backdrop-blur-sm">
-                    <div className={`w-24 h-24 rounded-full flex items-center justify-center text-4xl overflow-hidden relative transition-all duration-300 ${isSpeaking ? 'ring-4 ring-green-500 scale-110 shadow-lg shadow-green-500/20' : 'bg-gray-700'
-                        }`}>
+                <div className={`absolute inset-0 flex flex-col items-center justify-center space-y-4 bg-gray-900/50 ${isVoiceCall ? '' : 'backdrop-blur-sm'}`}>
+                    <div className={`rounded-full flex items-center justify-center text-4xl overflow-hidden relative transition-all duration-300 ${isSpeaking ? 'ring-4 ring-green-500 scale-110 shadow-lg shadow-green-500/20' : 'bg-gray-700'} ${isVoiceCall ? 'w-32 h-32' : 'w-24 h-24'}`}>
                         {avatar?.startsWith('data:image') ? (
                             <img src={avatar} alt={username} className="w-full h-full object-cover" />
                         ) : (
-                            <User size={48} className="text-gray-500" />
+                            <User size={isVoiceCall ? 64 : 48} className="text-gray-500" />
                         )}
 
                         {/* Speaker Animation */}
@@ -226,24 +236,31 @@ function ParticipantCard({
             )}
 
             {/* Overlays */}
-            <div className="absolute bottom-4 left-4 right-4 flex justify-between items-center pointer-events-none">
+            <div className={`absolute left-0 right-0 flex justify-center items-center pointer-events-none ${isVoiceCall ? 'bottom-4' : 'bottom-4 px-4 justify-between'}`}>
                 <div className="bg-black/50 backdrop-blur-md px-3 py-1 rounded-full flex items-center gap-2">
-                    <p className="font-bold text-sm text-white">{username}</p>
+                    <p className="font-bold text-xs text-white truncate max-w-[100px]">{username}</p>
                     {isLocal && (
-                        <span className="text-[10px] uppercase tracking-widest text-blue-400 font-bold bg-blue-400/10 px-2 py-0.5 rounded-full">
+                        <span className="text-[8px] uppercase tracking-widest text-blue-400 font-bold bg-blue-400/10 px-1.5 py-0.5 rounded-full">
                             You
                         </span>
                     )}
                 </div>
 
-                {isMuted && (
+                {!isVoiceCall && isMuted && (
                     <div className="bg-red-500/80 backdrop-blur-md p-1.5 rounded-full">
                         <MicOff size={14} className="text-white" />
                     </div>
                 )}
             </div>
 
-            {/* Audio for remote peers - Always render to ensure audio plays even if video is off */}
+            {/* In Voice call, show mute status centrally if needed, or overlay */}
+            {isVoiceCall && isMuted && (
+                <div className="absolute top-4 right-4 bg-red-500/80 backdrop-blur-md p-2 rounded-full">
+                    <MicOff size={16} className="text-white" />
+                </div>
+            )}
+
+            {/* Audio for remote peers */}
             {!isLocal && stream && (
                 <audio
                     autoPlay
@@ -256,3 +273,4 @@ function ParticipantCard({
         </div>
     );
 }
+
