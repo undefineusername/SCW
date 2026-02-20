@@ -34,7 +34,9 @@ export default function DirectCallView({
 }: DirectCallViewProps) {
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
     const localVideoRef = useRef<HTMLVideoElement>(null);
-    const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
+    const [hasRemoteVideo, setHasRemoteVideo] = useState(() => {
+        return !!(peerData.stream?.getVideoTracks()[0]?.enabled);
+    });
 
     useEffect(() => {
         if (remoteVideoRef.current && peerData.stream) {
@@ -43,7 +45,9 @@ export default function DirectCallView({
 
             const videoTrack = peerData.stream.getVideoTracks()[0];
             if (videoTrack) {
-                setHasRemoteVideo(videoTrack.enabled);
+                if (hasRemoteVideo !== videoTrack.enabled) {
+                    setHasRemoteVideo(videoTrack.enabled);
+                }
                 const onEnabled = () => setHasRemoteVideo(true);
                 const onDisabled = () => setHasRemoteVideo(false);
                 videoTrack.addEventListener('mute', onDisabled);

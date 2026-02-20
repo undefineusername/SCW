@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { Send, Settings, LogOut, Lock as LockIcon, UserPlus, ShieldAlert, X as XIcon } from 'lucide-react'
 import ChatMessage, { DateDivider } from '@/components/chat-message'
 import ConversationList from '@/components/conversation-list'
@@ -15,7 +15,6 @@ import { motion } from 'framer-motion'
 import Navigation from '@/components/navigation'
 import FriendsList from '@/components/friends-list'
 import { useCall } from '@/hooks/use-call'
-import type { CallType } from '@/hooks/use-call'
 import CallOverlay from '@/components/call/call-overlay'
 import IncomingCallDialog from '@/components/incoming-call-dialog'
 
@@ -121,49 +120,37 @@ export default function App() {
     }
   };
 
-  const { sendMessage: dispatchMessageOriginal } = useChatActions(currentUser?.uuid || null, currentUser?.key || null, currentUser);
-
-  const handleWebRTCSignal = useCallback((to: string, signal: any) => {
-    dispatchMessageOriginal(to, JSON.stringify({
-      system: true,
-      type: 'WEBRTC_SIGNAL',
-      signal: { ...signal, from: currentUser?.uuid }
-    }));
-  }, [dispatchMessageOriginal, currentUser?.uuid]);
 
   const {
-    callState,
-    callType,
-    peers,
+    // State
     localStream,
+    peers,
     isMuted: isCallMuted,
     isCameraOn,
+    isCallActive,
+    incomingCall: webRTCIncomingCall, // Rename to avoid conflict with local state if any, though we should remove local state
+
+    // Actions
     joinCall,
     leaveCall,
-    handleSignal: handleWebRTCSignalInternal,
+    acceptCall,
+    rejectCall,
     toggleMute,
-    toggleCamera,
-    isLocalSpeaking,
-    initiateConnections
-  } = useCall(currentUser?.uuid || null, handleWebRTCSignal);
+    toggleCamera
+  } = useCall(currentUser?.uuid || null);
 
-  const [incomingCall, setIncomingCall] = useState<{ from: string; type: CallType; signal: any } | null>(null);
-
-  const handleWebRTCSignalIncoming = useCallback((from: string, signal: any) => {
-    if (signal.type === 'offer' && callState === 'idle') {
-      console.log('📞 Received call offer from', from, 'type:', signal.callType);
-      setIncomingCall({ from, type: signal.callType || 'video', signal });
-    } else {
-      handleWebRTCSignalInternal({ ...signal, from });
-    }
-  }, [callState, handleWebRTCSignalInternal]);
+  // We don't need local incomingCall state anymore, use the one from the hook!
+  // But let's check generic "IncomingCallDialog" usage. 
+  // It uses `incomingCall` object { from, type, signal }.
+  // The hook returns `incomingCall` with same shape!
 
   const { isConnected, sendMessage, presence } = useChat(
     currentUser,
     selectedConversation,
-    handleWebRTCSignalIncoming,
-    (participants) => initiateConnections(participants)
+    undefined, // No signal handler needed
+    undefined  // No participants list handler needed
   );
+
 
   const conversations = useLiveQuery(() => db.conversations.toArray()) || [];
   const friends = useLiveQuery(() => db.friends.toArray()) || [];
@@ -522,20 +509,12 @@ export default function App() {
                 const group = conversations.find((c: any) => c.id === selectedConversation);
                 if (group) {
                   await joinCall(selectedConversation, 'voice');
-                  const targetUuids = group.isGroup
-                    ? (group.participants || []).map((p: any) => p.uuid)
-                    : [selectedConversation];
-                  initiateConnections(targetUuids);
                 }
               }}
               onVideoCall={async () => {
                 const group = conversations.find((c: any) => c.id === selectedConversation);
                 if (group) {
                   await joinCall(selectedConversation, 'video');
-                  const targetUuids = group.isGroup
-                    ? (group.participants || []).map((p: any) => p.uuid)
-                    : [selectedConversation];
-                  initiateConnections(targetUuids);
                 }
               }}
             />
@@ -716,40 +695,52 @@ export default function App() {
       />
 
       {/* Call UI */}
+      {/* Call UI */}
       <CallOverlay
-        isOpen={callState === 'in-call'}
-        callType={callType}
-        peers={peers}
+        isOpen={isCallActive}
+        callType={isCameraOn ? 'video' : 'voice'}
+        peers={Object.entries(peers).reduce((acc, [uuid, peer]) => {
+          const friend = friends.find((f: any) => f.uuid === uuid);
+          const conv = conversations.find((c: any) => c.id === uuid);
+          // For group members, we need to find them in the participants list of the group conversation
+          // This is a bit complex if we are in a group call but don't know WHICH group it is easily without tracking it separately 
+          // (though activeGroupIdRef is internal).
+          // But here we can try to look up in friends or conversations.
+          // Or we can try to find them in the currently selected conversation if it matches?
+          // Fallback: Unknown
+
+          acc[uuid] = {
+            ...peer,
+            username: friend?.username || conv?.username || `User ${uuid.slice(0, 4)}`,
+            avatar: friend?.avatar || conv?.avatar
+          };
+          return acc;
+        }, {} as any)}
         localStream={localStream}
         isMuted={isCallMuted}
         isCameraOn={isCameraOn}
-        isLocalSpeaking={isLocalSpeaking}
+        isLocalSpeaking={false} // Todo: expose from hook
         onToggleMute={toggleMute}
         onToggleCamera={toggleCamera}
         onLeave={leaveCall}
         isDark={isDark}
-        groupName={conversations.find((c: any) => c.id === (incomingCall?.from || selectedConversation))?.username || 'Group Call'}
+        groupName={conversations.find((c: any) => c.id === (selectedConversation))?.username || 'Group Call'}
       />
 
       <IncomingCallDialog
-        isOpen={!!incomingCall}
-        callerName={conversations.find(c => c.id === incomingCall?.from)?.username || friends.find(f => f.uuid === incomingCall?.from)?.username || 'Unknown Caller'}
-        callerAvatar={conversations.find(c => c.id === incomingCall?.from)?.avatar || friends.find(f => f.uuid === incomingCall?.from)?.avatar}
+        isOpen={!!webRTCIncomingCall}
+        callerName={conversations.find((c: any) => c.id === webRTCIncomingCall?.from)?.username || friends.find((f: any) => f.uuid === webRTCIncomingCall?.from)?.username || 'Unknown Caller'}
+        callerAvatar={conversations.find((c: any) => c.id === webRTCIncomingCall?.from)?.avatar || friends.find((f: any) => f.uuid === webRTCIncomingCall?.from)?.avatar}
         onAccept={async () => {
-          if (incomingCall) {
-            await joinCall(incomingCall.from, incomingCall.type);
-            handleWebRTCSignalInternal({ ...incomingCall.signal, from: incomingCall.from });
-            setIncomingCall(null);
+          if (webRTCIncomingCall) {
+            await acceptCall();
           }
         }}
         onReject={() => {
-          if (incomingCall) {
-            handleWebRTCSignal(incomingCall.from, { type: 'reject' });
-            setIncomingCall(null);
-          }
+          rejectCall();
         }}
         isDark={isDark}
-        callType={incomingCall?.type || 'video'}
+        callType={webRTCIncomingCall?.type || 'video'}
       />
     </div >
   )

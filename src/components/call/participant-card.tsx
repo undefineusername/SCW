@@ -31,7 +31,9 @@ export default function ParticipantCard({
     isVoiceCall
 }: ParticipantCardProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
-    const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
+    const [hasRemoteVideo, setHasRemoteVideo] = useState(() => {
+        return !!(stream?.getVideoTracks()[0]?.enabled);
+    });
 
     useEffect(() => {
         if (videoRef.current && stream) {
@@ -40,7 +42,9 @@ export default function ParticipantCard({
 
             const videoTrack = stream.getVideoTracks()[0];
             if (videoTrack) {
-                setHasRemoteVideo(videoTrack.enabled);
+                if (hasRemoteVideo !== videoTrack.enabled) {
+                    setHasRemoteVideo(videoTrack.enabled);
+                }
                 const onEnabled = () => setHasRemoteVideo(true);
                 const onDisabled = () => setHasRemoteVideo(false);
                 videoTrack.addEventListener('mute', onDisabled);
