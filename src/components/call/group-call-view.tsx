@@ -4,7 +4,14 @@ import { PhoneOff, Mic, MicOff, Video, VideoOff } from 'lucide-react';
 import ParticipantCard from './participant-card';
 
 interface GroupCallViewProps {
-    peers: Record<string, { stream: MediaStream | null; username?: string; avatar?: string; isSpeaking?: boolean }>;
+    peers: Record<string, {
+        stream: MediaStream | null;
+        username?: string;
+        avatar?: string;
+        isSpeaking?: boolean;
+        connectionState?: RTCPeerConnectionState;
+        iceState?: RTCIceConnectionState;
+    }>;
     localStream: MediaStream | null;
     isMuted: boolean;
     isCameraOn: boolean;
@@ -84,6 +91,7 @@ export default function GroupCallView({
                         isSpeaking={peer.isSpeaking}
                         isDark={isDark}
                         isVoiceCall={isVoiceCall}
+                        connectionState={peer.connectionState}
                     />
                 ))}
             </div>

@@ -16,6 +16,7 @@ interface ParticipantCardProps {
     isDark: boolean;
     _uuid?: string;
     isVoiceCall: boolean;
+    connectionState?: RTCPeerConnectionState;
 }
 
 export default function ParticipantCard({
@@ -28,7 +29,8 @@ export default function ParticipantCard({
     isSpeaking,
     isDark,
     _uuid,
-    isVoiceCall
+    isVoiceCall,
+    connectionState
 }: ParticipantCardProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const [hasRemoteVideo, setHasRemoteVideo] = useState(() => {
@@ -109,6 +111,12 @@ export default function ParticipantCard({
                     {isLocal && (
                         <span className="text-[8px] uppercase tracking-widest text-blue-400 font-bold bg-blue-400/10 px-1.5 py-0.5 rounded-full">
                             You
+                        </span>
+                    )}
+                    {!isLocal && connectionState && connectionState !== 'connected' && (
+                        <span className={`text-[8px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded-full ${connectionState === 'connecting' ? 'text-yellow-400 bg-yellow-400/10' : 'text-red-400 bg-red-400/10'
+                            }`}>
+                            {connectionState}
                         </span>
                     )}
                 </div>

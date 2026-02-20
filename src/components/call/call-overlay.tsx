@@ -9,7 +9,14 @@ import GroupCallView from './group-call-view';
 interface CallOverlayProps {
     isOpen: boolean;
     callType: CallType;
-    peers: Record<string, { stream: MediaStream | null; username?: string; avatar?: string; isSpeaking?: boolean }>;
+    peers: Record<string, {
+        stream: MediaStream | null;
+        username?: string;
+        avatar?: string;
+        isSpeaking?: boolean;
+        connectionState?: RTCPeerConnectionState;
+        iceState?: RTCIceConnectionState;
+    }>;
     localStream: MediaStream | null;
     isMuted: boolean;
     isCameraOn: boolean;
@@ -36,18 +43,19 @@ export default function CallOverlay({
     groupName
 }: CallOverlayProps) {
     const [duration, setDuration] = useState(0);
+    const hasConnectedPeer = Object.values(peers).some(p => p.connectionState === 'connected');
 
     useEffect(() => {
         let timer: any;
-        if (isOpen) {
+        if (isOpen && hasConnectedPeer) {
             timer = setInterval(() => {
                 setDuration(prev => prev + 1);
             }, 1000);
-        } else {
+        } else if (!isOpen) {
             setDuration(0);
         }
         return () => clearInterval(timer);
-    }, [isOpen]);
+    }, [isOpen, hasConnectedPeer]);
 
     const formatDuration = (seconds: number) => {
         const mins = Math.floor(seconds / 60);

@@ -147,16 +147,16 @@ export default function ChatHeader({
             )}
 
             <button
-              className={`p-2 rounded-lg transition-colors ${hoverClass} disabled:opacity-30`}
+              className={`p-2 rounded-lg transition-colors ${hoverClass}`}
               onClick={onVoiceCall}
-              disabled={isGroup}
+              title="음성통화"
             >
               <Phone size={17} className={iconClass} />
             </button>
             <button
-              className={`p-2 rounded-lg transition-colors ${hoverClass} disabled:opacity-30`}
+              className={`p-2 rounded-lg transition-colors ${hoverClass}`}
               onClick={onVideoCall}
-              disabled={isGroup}
+              title="영상통화"
             >
               <Video size={17} className={iconClass} />
             </button>
