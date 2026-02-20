@@ -94,18 +94,22 @@ export function useWebRTC(currentUserUuid: string | null) {
         };
 
         pc.ontrack = (event) => {
-            console.log(`Requesting track from ${targetUuid}`, event.streams[0]);
-            const stream = event.streams[0] || new MediaStream([event.track]);
+            console.log(`📡 [WebRTC] Track received from ${targetUuid}:`, event.track.kind);
+            const rawStream = event.streams[0] || new MediaStream([event.track]);
 
-            setPeers(prev => ({
-                ...prev,
-                [targetUuid]: {
-                    ...prev[targetUuid],
-                    stream,
-                    connectionState: pc.connectionState,
-                    iceState: pc.iceConnectionState
-                }
-            }));
+            setPeers(prev => {
+                // Return a new state with a new MediaStream instance so React components re-init their video refs
+                const nextStream = new MediaStream(rawStream.getTracks());
+                return {
+                    ...prev,
+                    [targetUuid]: {
+                        ...prev[targetUuid],
+                        stream: nextStream,
+                        connectionState: pc.connectionState,
+                        iceState: pc.iceConnectionState
+                    }
+                };
+            });
         };
 
         pc.onconnectionstatechange = () => {
@@ -257,6 +261,22 @@ export function useWebRTC(currentUserUuid: string | null) {
 
     }, [currentUserUuid, createPeerConnection]);
 
+    // --- Negotiation Trigger ---
+    const triggerRenegotiation = useCallback(() => {
+        pcMap.current.forEach(async (pc, uuid) => {
+            if (pc.signalingState === 'stable') {
+                console.log(`🔄 Triggering renegotiation for ${uuid}`);
+                try {
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    getSocket().emit('signal', { to: uuid, type: 'offer', sdp: offer });
+                } catch (e) {
+                    console.error(`❌ Renegotiation failed for ${uuid}:`, e);
+                }
+            }
+        });
+    }, []);
+
     // --- Global Socket Listeners ---
     useEffect(() => {
         if (!currentUserUuid) return;
@@ -345,9 +365,8 @@ export function useWebRTC(currentUserUuid: string | null) {
             });
 
         } catch (err) {
-            console.error("Failed to join call:", err);
+            console.error("❌ Failed to join call:", err);
             cleanup();
-            // Optional: Alert user? For now just log.
         }
     }, [cleanup, currentUserUuid, createPeerConnection, handleSignal]);
 
@@ -400,36 +419,46 @@ export function useWebRTC(currentUserUuid: string | null) {
     }, []);
 
     const toggleCamera = useCallback(async () => {
-        // Logic to toggle video track or request new stream
-        // For simplicity: just toggle enabled for now, or request new stream if upgrading from audio-only
         if (!localStreamRef.current) return;
 
         let videoTrack = localStreamRef.current.getVideoTracks()[0];
 
         if (videoTrack) {
             videoTrack.enabled = !videoTrack.enabled;
+            // Also notify peers about mute/unmute if needed, though WebRTC handles stream mute
             setIsCameraOn(videoTrack.enabled);
+            // Force re-render of local video
+            setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
         } else {
-            // Need to get video permission
             try {
-                // Easier: Get video only and add track
-                const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                console.log("🎥 Requesting camera permission...");
+                const videoStream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        facingMode: "user"
+                    }
+                });
+
                 videoTrack = videoStream.getVideoTracks()[0];
                 localStreamRef.current.addTrack(videoTrack);
 
                 // Add to existing connections
                 pcMap.current.forEach(pc => {
-                    pc.addTransceiver(videoTrack, { streams: [localStreamRef.current!] });
+                    pc.addTrack(videoTrack, localStreamRef.current!);
                 });
 
                 setIsCameraOn(true);
-                // Force update?
                 setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+
+                // Must renegotiate to let peers see the new track
+                triggerRenegotiation();
             } catch (e) {
-                console.error("Failed to enable camera", e);
+                console.error("❌ Failed to enable camera:", e);
+                // Optionally show error to user
             }
         }
-    }, []);
+    }, [triggerRenegotiation]);
 
     const leaveCall = useCallback(() => {
         if (activeGroupIdRef.current) {

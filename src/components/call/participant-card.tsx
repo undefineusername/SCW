@@ -38,7 +38,7 @@ export default function ParticipantCard({
     });
 
     useEffect(() => {
-        if (videoRef.current && stream) {
+        if (videoRef.current && stream && !isVideoOff) {
             videoRef.current.srcObject = stream;
             videoRef.current.play().catch(console.error);
 
@@ -59,7 +59,7 @@ export default function ParticipantCard({
                 setHasRemoteVideo(false);
             }
         }
-    }, [stream]);
+    }, [stream, isVideoOff, isVoiceCall]);
 
     const showPlaceholder = isVoiceCall || (isLocal ? isVideoOff : !hasRemoteVideo);
 

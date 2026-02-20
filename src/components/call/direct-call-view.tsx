@@ -61,11 +61,11 @@ export default function DirectCallView({
     }, [peerData.stream]);
 
     useEffect(() => {
-        if (localVideoRef.current && localStream) {
+        if (localVideoRef.current && localStream && isCameraOn) {
             localVideoRef.current.srcObject = localStream;
             localVideoRef.current.play().catch(console.error);
         }
-    }, [localStream]);
+    }, [localStream, isCameraOn]);
 
     return (
         <div className={`relative w-full h-full flex items-center justify-center overflow-hidden ${isDark ? 'bg-gray-900' : 'bg-gray-100'}`}>
