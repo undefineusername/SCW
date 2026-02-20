@@ -178,7 +178,11 @@ export function useCall(currentUserUuid: string | null, sendSignal: (to: string,
             if (type === 'video') {
                 try {
                     stream = await navigator.mediaDevices.getUserMedia({
-                        video: { width: 640, height: 480, frameRate: 24 },
+                        video: {
+                            width: { ideal: 640 },
+                            height: { ideal: 480 },
+                            frameRate: { ideal: 24 }
+                        },
                         audio: { echoCancellation: true, noiseSuppression: true }
                     });
                     setIsCameraOn(true);
@@ -269,7 +273,11 @@ export function useCall(currentUserUuid: string | null, sendSignal: (to: string,
             } else if (!isCameraOn) {
                 try {
                     const freshStream = await navigator.mediaDevices.getUserMedia({
-                        video: { width: 640, height: 480, frameRate: 24 }
+                        video: {
+                            width: { ideal: 640 },
+                            height: { ideal: 480 },
+                            frameRate: { ideal: 24 }
+                        }
                     });
                     const freshTrack = freshStream.getVideoTracks()[0];
                     localStreamRef.current.addTrack(freshTrack);

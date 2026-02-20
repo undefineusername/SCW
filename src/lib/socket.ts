@@ -10,7 +10,7 @@ export const getSocket = () => {
         socket = io(SOCKET_URL, {
             autoConnect: false,
             reconnection: true,
-            transports: ['websocket']
+            // transports: ['websocket'] // Allow default (polling + websocket) for better connectivity
         });
     }
     return socket;
