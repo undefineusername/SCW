@@ -1,21 +1,21 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { Send, Settings, LogOut, Lock as LockIcon, UserPlus, ShieldAlert, X as XIcon } from 'lucide-react'
-import ChatMessage, { DateDivider } from '@/components/chat-message'
-import ConversationList from '@/components/conversation-list'
-import ChatHeader from '@/components/chat-header'
-import SettingsModal from '@/components/settings-modal'
-import AuthScreen from '@/components/auth-screen'
-import { useChat, DECRYPTION_ERROR_MSG, NO_KEY_ERROR_MSG } from '@/hooks/use-chat'
+import ChatMessage, { DateDivider } from '@/components/chat/chat-message'
+import ConversationList from '@/components/chat/conversation-list'
+import ChatHeader from '@/components/chat/chat-header'
+import SettingsModal from '@/components/shared/settings-modal'
+import AuthScreen from '@/components/auth/auth-screen'
+import { useChat, DECRYPTION_ERROR_MSG, NO_KEY_ERROR_MSG } from '@/hooks/chat/use-chat'
 import { db } from '@/lib/db'
 import { decryptMessage, deriveKeyFromSecret } from '@/lib/crypto'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { getServerTime } from '@/lib/time'
 import { motion } from 'framer-motion'
-import Navigation from '@/components/navigation'
-import FriendsList from '@/components/friends-list'
-import { useCall } from '@/hooks/use-call'
+import Navigation from '@/components/shared/navigation'
+import FriendsList from '@/components/chat/friends-list'
+import { useCall } from '@/hooks/call/use-call'
 import CallOverlay from '@/components/call/call-overlay'
-import IncomingCallDialog from '@/components/incoming-call-dialog'
+import IncomingCallDialog from '@/components/call/incoming-call-dialog'
 
 type Theme = 'purple' | 'blue' | 'green' | 'orange' | 'pink'
 
@@ -375,6 +375,7 @@ export default function App() {
         isDark={isDark}
         themeAccent={colors.accent}
         isConnected={isConnected}
+        pendingRequestsCount={friends.filter(f => f.status === 'pending_incoming').length}
       />
 
       {/* 2nd Column: List View (Friends or Chats) */}

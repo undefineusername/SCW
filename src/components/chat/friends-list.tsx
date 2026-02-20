@@ -33,6 +33,7 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
     }, [pendingInviteCode]);
 
     const activeFriends = friends.filter(f => !f.status || f.status === 'friend');
+    const pendingRequests = friends.filter(f => f.status === 'pending_incoming');
 
     const handleFoundUser = async (data: { uuid: string; username?: string; publicKey?: any }) => {
         const username = data.username || `User-${data.uuid.slice(0, 8)}`; // Fallback
@@ -256,9 +257,51 @@ export default function FriendsList({ isDark, currentUser, onNewChat, sendMessag
                     </div>
                 </div>
 
-                <div className="mx-5 h-px bg-gray-100 dark:bg-gray-800 mb-4" />
+                {pendingRequests.length > 0 && (
+                    <div className="px-5 mb-6">
+                        <div className="flex items-center justify-between mb-4">
+                            <span className="text-[11px] font-bold text-blue-500 uppercase tracking-widest">Friend Requests</span>
+                            <span className="px-1.5 py-0.5 rounded-full bg-blue-500 text-white text-[9px] font-black">{pendingRequests.length}</span>
+                        </div>
+                        <div className="space-y-2">
+                            {pendingRequests.map(request => (
+                                <div key={request.uuid} className={`p-3 rounded-2xl border ${isDark ? 'bg-blue-500/5 border-blue-500/20' : 'bg-blue-50 border-blue-100'} flex flex-col gap-3`}>
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg overflow-hidden ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+                                            {request.avatar?.startsWith('data:image') ? (
+                                                <img src={request.avatar} alt={request.username} className="w-full h-full object-cover" />
+                                            ) : (request.avatar || '👤')}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className={`text-xs font-bold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{request.username}</p>
+                                            <p className="text-[9px] text-gray-500 font-mono truncate">ID: {request.uuid.slice(0, 8)}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => handleAccept(request.uuid, request.username)}
+                                            className="flex-1 py-1.5 bg-blue-600 text-white text-[10px] font-bold rounded-lg hover:bg-blue-700 transition-colors"
+                                        >
+                                            Accept
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                if (confirm('Ignore this request?')) {
+                                                    await db.friends.delete(request.uuid);
+                                                }
+                                            }}
+                                            className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-colors ${isDark ? 'bg-gray-800 text-gray-400 hover:text-red-400' : 'bg-white border text-gray-400 hover:text-red-500'}`}
+                                        >
+                                            Ignore
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
-                <div className="mx-5 h-px bg-gray-100 dark:bg-gray-800 mb-4" />
+                <div className="mx-5 h-px bg-gray-100 dark:bg-gray-800 mb-6" />
 
                 <div className="px-5">
                     <div className="flex items-center justify-between mb-4">

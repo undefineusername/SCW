@@ -4,7 +4,7 @@ import { PhoneOff, Mic, MicOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useState, useRef } from 'react';
 
-import type { CallState } from '@/hooks/use-voice-call';
+import type { CallState } from '@/hooks/call/use-voice-call';
 
 interface VoiceCallOverlayProps {
     callState: CallState;

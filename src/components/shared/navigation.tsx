@@ -8,9 +8,10 @@ interface NavigationProps {
   isDark: boolean;
   themeAccent: string;
   isConnected: boolean;
+  pendingRequestsCount?: number;
 }
 
-export default function Navigation({ activeTab, onTabChange, isDark, themeAccent, isConnected }: NavigationProps) {
+export default function Navigation({ activeTab, onTabChange, isDark, themeAccent, isConnected, pendingRequestsCount = 0 }: NavigationProps) {
   const tabs = [
     { id: 'friends' as const, icon: Users, label: 'Friends' },
     { id: 'chats' as const, icon: MessageSquare, label: 'Chats' },
@@ -33,7 +34,12 @@ export default function Navigation({ activeTab, onTabChange, isDark, themeAccent
               }`}
             title={tab.label}
           >
-            <Icon size={24} />
+            <div className="relative">
+              <Icon size={24} />
+              {tab.id === 'friends' && pendingRequestsCount > 0 && (
+                <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white dark:border-gray-900 shadow-sm" />
+              )}
+            </div>
           </button>
         );
       })}

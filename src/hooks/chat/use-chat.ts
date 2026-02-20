@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useChatKeys } from './chat/use-chat-keys';
-import { useChatPresence } from './chat/use-chat-presence';
-import { useChatActions } from './chat/use-chat-actions';
-import { useChatSocket } from './chat/use-chat-socket';
-export { DECRYPTION_ERROR_MSG, NO_KEY_ERROR_MSG } from './chat/chat-utils';
+import { useChatKeys } from './use-chat-keys';
+import { useChatPresence } from './use-chat-presence';
+import { useChatActions } from './use-chat-actions';
+import { useChatSocket } from './use-chat-socket';
+export { DECRYPTION_ERROR_MSG, NO_KEY_ERROR_MSG } from './chat-utils';
 
 export function useChat(
     user: { uuid: string; key: Uint8Array; username: string; avatar?: string; salt?: string; kdfParams?: any } | null,

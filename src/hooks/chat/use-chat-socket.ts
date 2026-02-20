@@ -187,32 +187,37 @@ export function useChatSocket(
                                             dhPublicKey: senderJWK || existing.dhPublicKey,
                                             avatar: payload.avatar || existing.avatar
                                         });
-                                    } else if (senderJWK || payload.avatar) {
+                                    } else {
+                                        // If already exists but not mutual outgoing, update status to pending_incoming (if not already friend)
+                                        const newStatus = existing?.status === 'friend' ? 'friend' : 'pending_incoming';
                                         await db.friends.update(data.from, {
                                             dhPublicKey: senderJWK || existing?.dhPublicKey,
-                                            avatar: payload.avatar || existing?.avatar
+                                            avatar: payload.avatar || existing?.avatar,
+                                            status: newStatus,
+                                            username: payload.username || existing?.username
                                         });
                                     }
 
-                                    if (newSharedSecret) {
-                                        const existingConv = await db.conversations.get(data.from);
-                                        const friendName = existing?.username || payload.username || `User-${data.from.slice(0, 8)}`;
-                                        if (!existingConv) {
-                                            await db.conversations.put({
-                                                id: data.from,
-                                                username: friendName,
-                                                avatar: payload.avatar || '👤',
-                                                lastMessage: '',
-                                                lastTimestamp: getServerTime(),
-                                                unreadCount: 0,
-                                                secret: newSharedSecret
-                                            });
-                                        } else if (!existingConv.secret || payload.avatar) {
-                                            await db.conversations.update(data.from, {
-                                                secret: newSharedSecret || existingConv.secret,
-                                                avatar: payload.avatar || existingConv.avatar
-                                            });
-                                        }
+                                    const existingConv = await db.conversations.get(data.from);
+                                    const friendName = existing?.username || payload.username || `User-${data.from.slice(0, 8)}`;
+                                    if (!existingConv) {
+                                        await db.conversations.put({
+                                            id: data.from,
+                                            username: friendName,
+                                            avatar: payload.avatar || '👤',
+                                            lastMessage: 'Received friend request',
+                                            lastTimestamp: getServerTime(),
+                                            unreadCount: 1,
+                                            secret: newSharedSecret || undefined
+                                        });
+                                    } else {
+                                        await db.conversations.update(data.from, {
+                                            secret: newSharedSecret || existingConv.secret,
+                                            avatar: payload.avatar || existingConv.avatar,
+                                            lastMessage: 'Received friend request',
+                                            lastTimestamp: getServerTime(),
+                                            unreadCount: (existingConv.unreadCount || 0) + 1
+                                        });
                                     }
                                     return;
                                 } else if (payload.type === 'FRIEND_ACCEPT') {
@@ -223,26 +228,25 @@ export function useChatSocket(
                                         avatar: payload.avatar || friendEntry?.avatar
                                     });
 
-                                    if (newSharedSecret) {
-                                        const existingConv = await db.conversations.get(data.from);
-                                        if (!existingConv) {
-                                            await db.conversations.put({
-                                                id: data.from,
-                                                username: resolvedUsername,
-                                                avatar: payload.avatar || '👤',
-                                                lastMessage: 'Friend Request Accepted',
-                                                lastTimestamp: getServerTime(),
-                                                unreadCount: 0,
-                                                secret: newSharedSecret
-                                            });
-                                        } else {
-                                            await db.conversations.update(data.from, {
-                                                secret: newSharedSecret,
-                                                avatar: payload.avatar || existingConv.avatar,
-                                                lastMessage: 'Friend Request Accepted',
-                                                lastTimestamp: getServerTime()
-                                            });
-                                        }
+                                    const existingConv = await db.conversations.get(data.from);
+                                    if (!existingConv) {
+                                        await db.conversations.put({
+                                            id: data.from,
+                                            username: resolvedUsername,
+                                            avatar: payload.avatar || '👤',
+                                            lastMessage: 'Friend Request Accepted',
+                                            lastTimestamp: getServerTime(),
+                                            unreadCount: 1,
+                                            secret: newSharedSecret || undefined
+                                        });
+                                    } else {
+                                        await db.conversations.update(data.from, {
+                                            secret: newSharedSecret || existingConv.secret,
+                                            avatar: payload.avatar || existingConv.avatar,
+                                            lastMessage: 'Friend Request Accepted',
+                                            lastTimestamp: getServerTime(),
+                                            unreadCount: (existingConv.unreadCount || 0) + 1
+                                        });
                                     }
                                     return;
                                 } else if (payload.type === 'E2EE_PING' || payload.type === 'E2EE_PONG') {
