@@ -9,7 +9,7 @@ import {
 } from '@/lib/crypto';
 import { DECRYPTION_ERROR_MSG, isSystemMessage } from './chat-utils';
 import { updateServerTimeOffset, getServerTime } from '@/lib/time';
-import { useChatContext } from 'stream-chat-react';
+// import { useChatContext } from 'stream-chat-react';
 
 export function useChatSocket(
     user: { uuid: string; key: Uint8Array; username: string; avatar?: string; salt?: string; kdfParams?: any } | null,
@@ -19,7 +19,7 @@ export function useChatSocket(
     onWebRTCSignal?: (from: string, signal: any) => void,
     onCallParticipantsList?: (participants: string[]) => void
 ) {
-    const { client: chatClient } = useChatContext();
+    // const { client: chatClient } = useChatContext();
     const [isConnected, setIsConnected] = useState(false);
     const [streamTokens, setStreamTokens] = useState<{ apiKey: string; chatToken: string; videoToken: string } | null>(null);
     const currentUserUuid = user?.uuid || null;
@@ -407,6 +407,7 @@ export function useChatSocket(
                 setStreamTokens(tokens);
             });
 
+            /*
             // Listen for Stream Messages
             if (chatClient) {
                 const handleStreamEvent = (event: any) => {
@@ -427,6 +428,7 @@ export function useChatSocket(
                     socket.disconnect();
                 };
             }
+            */
 
             socket.on('presence_update', async ({ uuid, status, publicKey }: { uuid: string; status: 'online' | 'offline', publicKey?: any }) => {
                 setPresence(prev => ({ ...prev, [uuid]: status }));
