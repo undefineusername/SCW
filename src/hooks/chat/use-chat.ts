@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { StreamChat } from 'stream-chat';
 import { db } from '@/lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useChatKeys } from './use-chat-keys';
@@ -10,6 +11,7 @@ export { DECRYPTION_ERROR_MSG, NO_KEY_ERROR_MSG } from './chat-utils';
 export function useChat(
     user: { uuid: string; key: Uint8Array; username: string; avatar?: string; salt?: string; kdfParams?: any } | null,
     selectedConversationUuid: string | null,
+    chatClient?: StreamChat | null,
     onWebRTCSignal?: (from: string, signal: any) => void,
     onCallParticipantsList?: (participants: string[]) => void
 ) {
@@ -24,7 +26,7 @@ export function useChat(
     const friends = useLiveQuery(() => db.friends.toArray()) || [];
 
     // 1. Actions (sendMessage, markAsRead)
-    const { sendMessage, markAsRead } = useChatActions(currentUserUuid, encryptionKey, user);
+    const { sendMessage, markAsRead } = useChatActions(currentUserUuid, encryptionKey, user, chatClient);
 
     // 2. Socket & Message Processing
     const { isConnected, streamTokens } = useChatSocket(
@@ -33,7 +35,8 @@ export function useChat(
         sendMessage,
         setPresence,
         onWebRTCSignal,
-        onCallParticipantsList
+        onCallParticipantsList,
+        chatClient
     );
 
     // Collect all friend UUIDs for presence tracking

@@ -108,15 +108,24 @@ export default function App() {
   };
 
 
+  const [streamTokensState, setStreamTokensState] = useState<{ apiKey: string; chatToken: string; videoToken: string } | null>(null);
+
+  const chatClient = useStreamChat(streamTokensState?.apiKey || null, currentUser?.uuid || null, streamTokensState?.chatToken || null);
+  const videoClient = useStreamVideo(streamTokensState?.apiKey || null, currentUser?.uuid || null, streamTokensState?.videoToken || null);
+
   const { isConnected, sendMessage, presence, streamTokens } = useChat(
     currentUser,
     selectedConversation,
+    chatClient,
     undefined, // No signal handler needed
     undefined  // No participants list handler needed
   );
 
-  const chatClient = useStreamChat(streamTokens?.apiKey || null, currentUser?.uuid || null, streamTokens?.chatToken || null);
-  const videoClient = useStreamVideo(streamTokens?.apiKey || null, currentUser?.uuid || null, streamTokens?.videoToken || null);
+  useEffect(() => {
+    if (streamTokens) {
+      setStreamTokensState(streamTokens);
+    }
+  }, [streamTokens]);
 
   const onCallEnded = useMemo(() => (groupId: string, type: string, duration: number) => {
     const typeStr = type === 'video' ? '영상통화' : '음성통화';
@@ -161,7 +170,6 @@ export default function App() {
       <StreamVideo client={videoClient}>
         <AuthenticatedApp
           currentUser={currentUser}
-          chatClient={chatClient}
           videoClient={videoClient}
           isConnected={isConnected}
           sendMessage={sendMessage}
@@ -187,7 +195,6 @@ export default function App() {
 
 interface AuthenticatedAppProps {
   currentUser: any;
-  chatClient: any;
   videoClient: any;
   isConnected: boolean;
   sendMessage: any;
@@ -209,6 +216,7 @@ interface AuthenticatedAppProps {
 
 function AuthenticatedApp({
   currentUser,
+  videoClient,
   isConnected,
   sendMessage,
   presence,
@@ -246,7 +254,7 @@ function AuthenticatedApp({
     rejectCall,
     toggleMute,
     toggleCamera
-  } = useCall(currentUser?.uuid || null, undefined, onCallEnded);
+  } = useCall(currentUser?.uuid || null, videoClient, undefined, onCallEnded);
 
   // Check for Invite Link
   useEffect(() => {

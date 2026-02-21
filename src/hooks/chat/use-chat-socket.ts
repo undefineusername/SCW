@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { StreamChat } from 'stream-chat';
 import { registerMaster } from '@/lib/socket';
 import { db, type LocalMessage } from '@/lib/db';
 import {
@@ -9,7 +10,6 @@ import {
 } from '@/lib/crypto';
 import { DECRYPTION_ERROR_MSG, isSystemMessage } from './chat-utils';
 import { updateServerTimeOffset, getServerTime } from '@/lib/time';
-// import { useChatContext } from 'stream-chat-react';
 
 export function useChatSocket(
     user: { uuid: string; key: Uint8Array; username: string; avatar?: string; salt?: string; kdfParams?: any } | null,
@@ -17,9 +17,9 @@ export function useChatSocket(
     sendMessage: (toUuid: string, text: string) => Promise<string | undefined>,
     setPresence: React.Dispatch<React.SetStateAction<Record<string, "online" | "offline">>>,
     onWebRTCSignal?: (from: string, signal: any) => void,
-    onCallParticipantsList?: (participants: string[]) => void
+    onCallParticipantsList?: (participants: string[]) => void,
+    chatClient?: StreamChat | null
 ) {
-    // const { client: chatClient } = useChatContext();
     const [isConnected, setIsConnected] = useState(false);
     const [streamTokens, setStreamTokens] = useState<{ apiKey: string; chatToken: string; videoToken: string } | null>(null);
     const currentUserUuid = user?.uuid || null;
@@ -407,10 +407,10 @@ export function useChatSocket(
                 setStreamTokens(tokens);
             });
 
-            /*
-            // Listen for Stream Messages
+            // Listen for Stream Messages (Redundancy/P2P Fallback)
+            let streamHandler: ((event: any) => void) | null = null;
             if (chatClient) {
-                const handleStreamEvent = (event: any) => {
+                streamHandler = (event: any) => {
                     if (event.type === 'message.new' && event.message.custom_payload) {
                         console.log('📡 [Stream] New message received from', event.user.id);
                         onRawPush({
@@ -422,13 +422,8 @@ export function useChatSocket(
                         });
                     }
                 };
-                chatClient.on(handleStreamEvent);
-                return () => {
-                    chatClient.off(handleStreamEvent);
-                    socket.disconnect();
-                };
+                chatClient.on('message.new', streamHandler);
             }
-            */
 
             socket.on('presence_update', async ({ uuid, status, publicKey }: { uuid: string; status: 'online' | 'offline', publicKey?: any }) => {
                 setPresence(prev => ({ ...prev, [uuid]: status }));
@@ -468,6 +463,9 @@ export function useChatSocket(
                 socket.off('call_participants_list');
                 socket.off('presence_update');
                 socket.off('stream_tokens');
+                if (chatClient && streamHandler) {
+                    chatClient.off('message.new', streamHandler);
+                }
             };
         };
 
@@ -475,7 +473,7 @@ export function useChatSocket(
         return () => {
             cleanupPromise.then(cleanup => cleanup && cleanup());
         };
-    }, [user, selectedConversationUuid, sendMessage, setPresence, currentUserUuid, encryptionKey]);
+    }, [user, selectedConversationUuid, sendMessage, setPresence, currentUserUuid, encryptionKey, chatClient]);
 
     return { isConnected, streamTokens };
 }

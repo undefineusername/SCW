@@ -1,8 +1,9 @@
+import { StreamVideoClient } from '@stream-io/video-react-sdk';
 import { useStreamVideoCall } from '../stream/use-stream-video-call';
 export type { CallType } from './use-webrtc'; // Keep types for now
 
-export const useCall = (currentUserUuid: string | null, _onCallStarted?: any, _onCallEnded?: any) => {
-    const streamCall = useStreamVideoCall(currentUserUuid);
+export const useCall = (currentUserUuid: string | null, videoClient?: StreamVideoClient | null, _onCallStarted?: any, _onCallEnded?: any) => {
+    const streamCall = useStreamVideoCall(currentUserUuid, videoClient);
 
     // Map Stream participants identifying them as remote peers
     const peers: Record<string, any> = {};

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useStreamVideoClient, Call, type MemberRequest } from '@stream-io/video-react-sdk';
+import { StreamVideoClient, Call, type MemberRequest } from '@stream-io/video-react-sdk';
 
-export function useStreamVideoCall(currentUserUuid: string | null) {
-    const videoClient = useStreamVideoClient();
+export function useStreamVideoCall(currentUserUuid: string | null, videoClient?: StreamVideoClient | null) {
     const [activeCall, setActiveCall] = useState<Call | null>(null);
     const [incomingCall, setIncomingCall] = useState<Call | null>(null);
 

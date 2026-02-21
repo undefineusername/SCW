@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { getSocket } from '@/lib/socket';
 import { db } from '@/lib/db';
-import { useChatContext } from 'stream-chat-react';
+import { StreamChat } from 'stream-chat';
 import {
     encryptMessage,
     deriveKeyFromSecret,
@@ -13,9 +13,9 @@ import { getServerTime } from '@/lib/time';
 export function useChatActions(
     currentUserUuid: string | null,
     encryptionKey: Uint8Array | null,
-    user: { username: string; avatar?: string } | null
+    user: { username: string; avatar?: string } | null,
+    chatClient?: StreamChat | null
 ) {
-    const { client: chatClient } = useChatContext();
     const sendMessage = useCallback(async (
         toUuid: string,
         text: string,
