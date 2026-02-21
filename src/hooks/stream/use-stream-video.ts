@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { StreamVideoClient, User } from '@stream-io/video-react-sdk';
+import { StreamVideoClient, type User } from '@stream-io/video-react-sdk';
 
 export function useStreamVideo(apiKey: string | null, userUuid: string | null, token: string | null) {
     const [videoClient, setVideoClient] = useState<StreamVideoClient | null>(null);
