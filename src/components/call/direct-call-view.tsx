@@ -87,8 +87,10 @@ export default function DirectCallView({
                                 <User size={64} className="text-gray-500" />
                             )}
                         </div>
-                        <h2 className="text-3xl font-bold">{peerData.username || 'Unknown'}</h2>
-                        <p className="animate-pulse opacity-70">Call {formatDuration(duration)}</p>
+                        <h2 className="text-3xl font-bold">{peerData.username || (duration < 3 ? 'Connecting...' : 'Call Ended')}</h2>
+                        <p className="animate-pulse opacity-70">
+                            {peerData.username ? `Call ${formatDuration(duration)}` : 'Please wait...'}
+                        </p>
                     </div>
                 )}
             </div>

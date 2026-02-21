@@ -154,8 +154,12 @@ export default function ChatHeader({
               <Phone size={17} className={iconClass} />
             </button>
             <button
+              type="button"
               className={`p-2 rounded-lg transition-colors ${hoverClass}`}
-              onClick={onVideoCall}
+              onClick={() => {
+                console.log("🎥 Video call button clicked!");
+                onVideoCall?.();
+              }}
               title="영상통화"
             >
               <Video size={17} className={iconClass} />

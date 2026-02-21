@@ -113,23 +113,33 @@ export function useWebRTC(currentUserUuid: string | null) {
         };
 
         pc.onconnectionstatechange = () => {
-            console.log(`Connection state change for ${targetUuid}: ${pc.connectionState}`);
+            console.log(`📡 [WebRTC] Connection state for ${targetUuid}: ${pc.connectionState}`);
             setPeers(prev => ({
                 ...prev,
                 [targetUuid]: { ...prev[targetUuid], connectionState: pc.connectionState }
             }));
+
+            // Auto-end 1:1 call if the only peer disconnects
+            if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+                if (activeGroupIdRef.current === targetUuid) {
+                    console.log("⚠️ 1:1 Peer connection lost, hanging up...");
+                    setTimeout(() => leaveCall(), 1500);
+                }
+            }
         };
 
         pc.oniceconnectionstatechange = () => {
-            console.log(`ICE state change for ${targetUuid}: ${pc.iceConnectionState}`);
-            if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
-                console.warn(`ICE Warning for ${targetUuid}. Restarting ICE?`);
-                // specific logic for ice restart can go here
-            }
+            console.log(`📡 [WebRTC] ICE state for ${targetUuid}: ${pc.iceConnectionState}`);
             setPeers(prev => ({
                 ...prev,
                 [targetUuid]: { ...prev[targetUuid], iceState: pc.iceConnectionState }
             }));
+
+            if (['disconnected', 'failed', 'closed'].includes(pc.iceConnectionState)) {
+                if (activeGroupIdRef.current === targetUuid) {
+                    setTimeout(() => leaveCall(), 1500);
+                }
+            }
         };
 
         // Initialize peer state
@@ -174,9 +184,19 @@ export function useWebRTC(currentUserUuid: string | null) {
                 pc.close();
                 pcMap.current.delete(data.uuid);
             }
+
             setPeers(prev => {
                 const next = { ...prev };
                 delete next[data.uuid];
+
+                // 1:1 Call Auto-End: If the person who left is our 1:1 target, end the call
+                if (activeGroupIdRef.current === data.uuid || Object.keys(next).length === 0) {
+                    console.log("Empty call or peer left in 1:1, hanging up...");
+                    // Use a timeout to avoid state update during render/effect cycle if needed, 
+                    // though leaveCall is a callback. 
+                    setTimeout(() => leaveCall(), 100);
+                }
+
                 return next;
             });
             return;
@@ -299,7 +319,15 @@ export function useWebRTC(currentUserUuid: string | null) {
 
     // --- Join Call ---
     const joinCall = useCallback(async (groupId: string, type: CallType = 'video') => {
-        console.log(`📡 [WebRTC] joinCall: groupId=${groupId}, type=${type}`);
+        console.log(`📡 [WebRTC] joinCall triggered: groupId=${groupId}, type=${type}`);
+        // alert(`통화 시작 시도: ${type}`); // 임시 디버깅용 알림
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            console.error("❌ navigator.mediaDevices.getUserMedia is not available. Are you on HTTPS or localhost?");
+            alert("카메라/마이크를 사용할 수 없는 환경입니다. (HTTPS 연결이 아니거나 브라우저에서 차단됨)");
+            return;
+        }
+
         cleanup();
         activeGroupIdRef.current = groupId;
         setIsCallActive(true);
@@ -308,28 +336,33 @@ export function useWebRTC(currentUserUuid: string | null) {
             let stream: MediaStream;
             try {
                 console.log(`🎥 Requesting media: audio=true, video=${type === 'video'}`);
-                // Try to get both if video is requested
-                stream = await navigator.mediaDevices.getUserMedia({
+
+                const constraints: MediaStreamConstraints = {
                     audio: true,
                     video: type === 'video' ? {
                         facingMode: "user",
-                        width: { ideal: 1280, max: 1920 },
-                        height: { ideal: 720, max: 1080 }
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
                     } : false
-                });
-                console.log("✅ Media stream obtained");
-                setIsCameraOn(type === 'video');
-            } catch (err) {
-                console.warn("⚠️ Failed to get requested media, trying fallback...", err);
+                };
+
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                console.log("✅ Media stream obtained:", stream.id);
+
+                // 트랙이 제대로 확보되었는지 확인
+                if (type === 'video' && stream.getVideoTracks().length === 0) {
+                    console.warn("⚠️ Video requested but no video track found in stream!");
+                }
+
+                setIsCameraOn(type === 'video' && stream.getVideoTracks().length > 0);
+            } catch (err: any) {
+                console.error("⚠️ Failed to get requested media:", err);
+
                 if (type === 'video') {
-                    // Fallback to audio only if video failed
-                    stream = await navigator.mediaDevices.getUserMedia({
-                        audio: true,
-                        video: false
-                    });
+                    console.log("🔄 falling back to audio-only...");
+                    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
                     setIsCameraOn(false);
                 } else {
-                    // If audio also fails, throw
                     throw err;
                 }
             }
