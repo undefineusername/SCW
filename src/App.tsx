@@ -6,6 +6,7 @@ import ChatHeader from '@/components/chat/chat-header'
 import SettingsModal from '@/components/shared/settings-modal'
 import AuthScreen from '@/components/auth/auth-screen'
 import { useChat, DECRYPTION_ERROR_MSG, NO_KEY_ERROR_MSG } from '@/hooks/chat/use-chat'
+import { isSystemMessage } from '@/hooks/chat/chat-utils'
 import { db } from '@/lib/db'
 import { decryptMessage, deriveKeyFromSecret } from '@/lib/crypto'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -120,6 +121,26 @@ export default function App() {
   };
 
 
+  const { isConnected, sendMessage, presence } = useChat(
+    currentUser,
+    selectedConversation,
+    undefined, // No signal handler needed
+    undefined  // No participants list handler needed
+  );
+
+  const onCallEnded = useMemo(() => (groupId: string, type: string, duration: number) => {
+    const typeStr = type === 'video' ? '영상통화' : '음성통화';
+    const min = Math.floor(duration / 60);
+    const sec = duration % 60;
+    const durationStr = duration > 0 ? ` (${min > 0 ? `${min}분 ` : ''}${sec}초)` : '';
+
+    sendMessage(groupId, JSON.stringify({
+      system: true,
+      type: 'CALL_LOG',
+      text: `${typeStr} 종료${durationStr}`
+    }));
+  }, [sendMessage]);
+
   const {
     // State
     localStream,
@@ -127,7 +148,7 @@ export default function App() {
     isMuted: isCallMuted,
     isCameraOn,
     isCallActive,
-    incomingCall: webRTCIncomingCall, // Rename to avoid conflict with local state if any, though we should remove local state
+    incomingCall: webRTCIncomingCall,
 
     // Actions
     joinCall,
@@ -136,19 +157,7 @@ export default function App() {
     rejectCall,
     toggleMute,
     toggleCamera
-  } = useCall(currentUser?.uuid || null);
-
-  // We don't need local incomingCall state anymore, use the one from the hook!
-  // But let's check generic "IncomingCallDialog" usage. 
-  // It uses `incomingCall` object { from, type, signal }.
-  // The hook returns `incomingCall` with same shape!
-
-  const { isConnected, sendMessage, presence } = useChat(
-    currentUser,
-    selectedConversation,
-    undefined, // No signal handler needed
-    undefined  // No participants list handler needed
-  );
+  } = useCall(currentUser?.uuid || null, undefined, onCallEnded);
 
 
   const conversations = useLiveQuery(() => db.conversations.toArray()) || [];
@@ -596,8 +605,8 @@ export default function App() {
                         replyToText: item.replyToText,
                         replyToSender: item.replyToSender,
                         senderName: isMyMsg ? '나' : (senderFriend?.username || (item.from ? `User-${item.from.slice(0, 4)}` : '상대방')),
-                        senderAvatar: isMyMsg ? '' : (senderFriend?.avatar || '👤'),
-                        type: item.type === 'system' ? 'system' : 'text',
+                        senderAvatar: isMyMsg ? currentUser?.avatar : (senderFriend?.avatar || '👤'),
+                        type: isSystemMessage(item.text) ? 'system' : 'text',
                       }}
                       isDark={isDark}
                       fontSize={fontSize}

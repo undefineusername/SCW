@@ -25,7 +25,11 @@ const ICE_SERVERS = [
     { urls: 'stun:stun2.l.google.com:19302' },
 ];
 
-export function useWebRTC(currentUserUuid: string | null) {
+export function useWebRTC(
+    currentUserUuid: string | null,
+    onCallStarted?: (groupId: string, type: CallType) => void,
+    onCallEnded?: (groupId: string, type: CallType, duration: number) => void
+) {
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
     const [peers, setPeers] = useState<Record<string, PeerState>>({});
     const [isMuted, setIsMuted] = useState(false);
@@ -37,6 +41,8 @@ export function useWebRTC(currentUserUuid: string | null) {
     const candidatesQueue = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
     const localStreamRef = useRef<MediaStream | null>(null);
     const activeGroupIdRef = useRef<string | null>(null);
+    const callStartTimeRef = useRef<number | null>(null);
+    const callTypeRef = useRef<CallType>('video');
 
     // VAD Refs
     const audioCtxRef = useRef<AudioContext | null>(null);
@@ -45,6 +51,14 @@ export function useWebRTC(currentUserUuid: string | null) {
     // --- Cleanup Function ---
     const cleanup = useCallback(() => {
         console.log("🧹 [WebRTC] Cleanup triggered");
+        const duration = callStartTimeRef.current ? Math.floor((Date.now() - callStartTimeRef.current) / 1000) : 0;
+        const gid = activeGroupIdRef.current;
+        const type = callTypeRef.current;
+
+        if (isCallActive && gid && onCallEnded) {
+            onCallEnded(gid, type, duration);
+        }
+
         pcMap.current.forEach((pc) => pc.close());
         pcMap.current.clear();
         candidatesQueue.current.clear();
@@ -66,12 +80,11 @@ export function useWebRTC(currentUserUuid: string | null) {
         setIsMuted(false);
         setIsCameraOn(false);
         activeGroupIdRef.current = null;
-    }, []);
+        callStartTimeRef.current = null;
+    }, [isCallActive, onCallEnded]);
 
     // --- Peer Connection Management ---
     const createPeerConnection = useCallback((targetUuid: string, politely: boolean) => {
-        if (pcMap.current.has(targetUuid)) return pcMap.current.get(targetUuid)!;
-
         console.log(`Creating PeerConnection for ${targetUuid} (polite: ${politely})`);
         const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
         pcMap.current.set(targetUuid, pc);
@@ -330,14 +343,20 @@ export function useWebRTC(currentUserUuid: string | null) {
 
         cleanup();
         activeGroupIdRef.current = groupId;
+        callTypeRef.current = type;
+        callStartTimeRef.current = Date.now();
         setIsCallActive(true);
+
+        if (onCallStarted) {
+            onCallStarted(groupId, type);
+        }
 
         try {
             let stream: MediaStream;
             try {
                 console.log(`🎥 Requesting media: audio=true, video=${type === 'video'}`);
 
-                const constraints: MediaStreamConstraints = {
+                const idealConstraints: MediaStreamConstraints = {
                     audio: true,
                     video: type === 'video' ? {
                         facingMode: "user",
@@ -346,25 +365,36 @@ export function useWebRTC(currentUserUuid: string | null) {
                     } : false
                 };
 
-                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia(idealConstraints);
+                } catch (firstErr) {
+                    if (type === 'video') {
+                        console.warn("⚠️ Ideal constraints failed, trying simple video:true...", firstErr);
+                        try {
+                            stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+                        } catch (secondErr) {
+                            console.error("❌ Even simple video failed, falling back to audio-only", secondErr);
+                            stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                        }
+                    } else {
+                        throw firstErr;
+                    }
+                }
+
                 console.log("✅ Media stream obtained:", stream.id);
 
                 // 트랙이 제대로 확보되었는지 확인
-                if (type === 'video' && stream.getVideoTracks().length === 0) {
+                const hasVideo = stream.getVideoTracks().length > 0;
+                if (type === 'video' && !hasVideo) {
                     console.warn("⚠️ Video requested but no video track found in stream!");
                 }
 
-                setIsCameraOn(type === 'video' && stream.getVideoTracks().length > 0);
+                setIsCameraOn(type === 'video' && hasVideo);
             } catch (err: any) {
-                console.error("⚠️ Failed to get requested media:", err);
-
-                if (type === 'video') {
-                    console.log("🔄 falling back to audio-only...");
-                    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                    setIsCameraOn(false);
-                } else {
-                    throw err;
-                }
+                console.error("❌ Critical media error (likely no audio device):", err);
+                alert("마이크 또는 카메라 장치를 찾을 수 없거나 접근이 차단되었습니다.");
+                cleanup();
+                return;
             }
 
             localStreamRef.current = stream;
@@ -472,13 +502,19 @@ export function useWebRTC(currentUserUuid: string | null) {
         } else {
             try {
                 console.log("🎥 Requesting camera permission...");
-                const videoStream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 },
-                        facingMode: "user"
-                    }
-                });
+                let videoStream: MediaStream;
+                try {
+                    videoStream = await navigator.mediaDevices.getUserMedia({
+                        video: {
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 },
+                            facingMode: "user"
+                        }
+                    });
+                } catch (e) {
+                    console.warn("⚠️ Ideal camera constraints failed, trying simple video:true", e);
+                    videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                }
 
                 videoTrack = videoStream.getVideoTracks()[0];
                 localStreamRef.current.addTrack(videoTrack);

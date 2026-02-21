@@ -21,6 +21,7 @@ export function useChat(
 
     // Use Dexie's live query to automatically update UI on DB changes
     const conversations = useLiveQuery(() => db.conversations.toArray()) || [];
+    const friends = useLiveQuery(() => db.friends.toArray()) || [];
 
     // 1. Actions (sendMessage, markAsRead)
     const { sendMessage, markAsRead } = useChatActions(currentUserUuid, encryptionKey, user);
@@ -35,8 +36,15 @@ export function useChat(
         onCallParticipantsList
     );
 
-    // 3. Presence Polling
-    useChatPresence(selectedConversationUuid, isConnected);
+    // Collect all friend UUIDs for presence tracking
+    const friendUuids = friends.map(f => f.uuid);
+    // Include selected conversation if it's not a friend yet
+    if (selectedConversationUuid && !friendUuids.includes(selectedConversationUuid)) {
+        friendUuids.push(selectedConversationUuid);
+    }
+
+    // 3. Presence Polling (Track all friends + current)
+    useChatPresence(friendUuids, isConnected);
 
     // 4. DH Key Management
     useChatKeys(currentUserUuid, isConnected, user);
