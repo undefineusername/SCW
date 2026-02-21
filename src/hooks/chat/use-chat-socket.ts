@@ -9,6 +9,7 @@ import {
 } from '@/lib/crypto';
 import { DECRYPTION_ERROR_MSG, isSystemMessage } from './chat-utils';
 import { updateServerTimeOffset, getServerTime } from '@/lib/time';
+import { useChatContext } from 'stream-chat-react';
 
 export function useChatSocket(
     user: { uuid: string; key: Uint8Array; username: string; avatar?: string; salt?: string; kdfParams?: any } | null,
@@ -18,7 +19,9 @@ export function useChatSocket(
     onWebRTCSignal?: (from: string, signal: any) => void,
     onCallParticipantsList?: (participants: string[]) => void
 ) {
+    const { client: chatClient } = useChatContext();
     const [isConnected, setIsConnected] = useState(false);
+    const [streamTokens, setStreamTokens] = useState<{ apiKey: string; chatToken: string; videoToken: string } | null>(null);
     const currentUserUuid = user?.uuid || null;
     const encryptionKey = user?.key || null;
 
@@ -45,7 +48,11 @@ export function useChatSocket(
             });
 
             setIsConnected(socket.connected);
-            const onConnect = () => setIsConnected(true);
+            const onConnect = () => {
+                setIsConnected(true);
+                // Request Stream tokens immediately on connection
+                socket.emit('get_stream_token');
+            };
             const onDisconnect = () => setIsConnected(false);
 
             const onRawPush = async (data: { from: string; to: string; payload: any; timestamp: number; type?: string; msgId?: string }) => {
@@ -395,6 +402,32 @@ export function useChatSocket(
                 }
             });
 
+            socket.on('stream_tokens', (tokens: { apiKey: string; chatToken: string; videoToken: string }) => {
+                console.log('🎫 [Stream] Received tokens from server');
+                setStreamTokens(tokens);
+            });
+
+            // Listen for Stream Messages
+            if (chatClient) {
+                const handleStreamEvent = (event: any) => {
+                    if (event.type === 'message.new' && event.message.custom_payload) {
+                        console.log('📡 [Stream] New message received from', event.user.id);
+                        onRawPush({
+                            from: event.user.id,
+                            to: currentUserUuid!,
+                            payload: event.message.custom_payload,
+                            timestamp: new Date(event.message.created_at).getTime(),
+                            msgId: event.message.msgId
+                        });
+                    }
+                };
+                chatClient.on(handleStreamEvent);
+                return () => {
+                    chatClient.off(handleStreamEvent);
+                    socket.disconnect();
+                };
+            }
+
             socket.on('presence_update', async ({ uuid, status, publicKey }: { uuid: string; status: 'online' | 'offline', publicKey?: any }) => {
                 setPresence(prev => ({ ...prev, [uuid]: status }));
                 if (publicKey && uuid !== currentUserUuid) {
@@ -432,6 +465,7 @@ export function useChatSocket(
                 socket.off('msg_ack_push', onReadReceipts);
                 socket.off('call_participants_list');
                 socket.off('presence_update');
+                socket.off('stream_tokens');
             };
         };
 
@@ -441,5 +475,5 @@ export function useChatSocket(
         };
     }, [user, selectedConversationUuid, sendMessage, setPresence, currentUserUuid, encryptionKey]);
 
-    return { isConnected };
+    return { isConnected, streamTokens };
 }

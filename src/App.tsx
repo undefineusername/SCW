@@ -17,6 +17,11 @@ import FriendsList from '@/components/chat/friends-list'
 import { useCall } from '@/hooks/call/use-call'
 import CallOverlay from '@/components/call/call-overlay'
 import IncomingCallDialog from '@/components/call/incoming-call-dialog'
+import { Chat } from 'stream-chat-react'
+import { StreamVideo } from '@stream-io/video-react-sdk'
+import { useStreamChat } from '@/hooks/stream/use-stream-chat'
+import { useStreamVideo } from '@/hooks/stream/use-stream-video'
+import 'stream-chat-react/dist/css/v2/index.css'
 
 type Theme = 'purple' | 'blue' | 'green' | 'orange' | 'pink'
 
@@ -121,12 +126,15 @@ export default function App() {
   };
 
 
-  const { isConnected, sendMessage, presence } = useChat(
+  const { isConnected, sendMessage, presence, streamTokens } = useChat(
     currentUser,
     selectedConversation,
     undefined, // No signal handler needed
     undefined  // No participants list handler needed
   );
+
+  const chatClient = useStreamChat(streamTokens?.apiKey || null, currentUser?.uuid || null, streamTokens?.chatToken || null);
+  const videoClient = useStreamVideo(streamTokens?.apiKey || null, currentUser?.uuid || null, streamTokens?.videoToken || null);
 
   const onCallEnded = useMemo(() => (groupId: string, type: string, duration: number) => {
     const typeStr = type === 'video' ? '영상통화' : '음성통화';
@@ -375,380 +383,395 @@ export default function App() {
     return <AuthScreen isDark={isDark} onAuthenticated={handleAuthenticated} />;
   }
 
+  if (!chatClient || !videoClient) {
+    return (
+      <div className={`flex h-screen items-center justify-center ${isDark ? 'bg-gray-950 text-white' : 'bg-white text-gray-900'}`}>
+        <div className="flex flex-col items-center space-y-4">
+          <div className={`w-12 h-12 border-4 ${colors.accent === 'purple-500' ? 'border-purple-500' : 'border-blue-500'} border-t-transparent rounded-full animate-spin`}></div>
+          <p className="animate-pulse font-medium">Initializing secure streams...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`flex h-screen ${isDark ? 'bg-gray-950 text-gray-100' : 'bg-white text-gray-900'} ${fontClass} ${fontSizeClass}`}>
-      {/* 1st Column: Tab Navigation */}
-      <Navigation
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        isDark={isDark}
-        themeAccent={colors.accent}
-        isConnected={isConnected}
-        pendingRequestsCount={friends.filter(f => f.status === 'pending_incoming').length}
-      />
-
-      {/* 2nd Column: List View (Friends or Chats) */}
-      <motion.div
-        key={activeTab}
-        initial={{ opacity: 0, x: -10 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.2 }}
-        className={`w-80 ${isDark ? 'bg-gray-900/50 border-gray-800' : 'bg-gray-50 border-gray-100'} border-r flex flex-col`}
-      >
-        {activeTab === 'friends' && (
-          <FriendsList
+    <Chat client={chatClient}>
+      <StreamVideo client={videoClient}>
+        <div className={`flex h-screen ${isDark ? 'bg-gray-950 text-gray-100' : 'bg-white text-gray-900'} ${fontClass} ${fontSizeClass}`}>
+          {/* 1st Column: Tab Navigation */}
+          <Navigation
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
             isDark={isDark}
-            currentUser={currentUser}
-            onNewChat={handleNewChat}
-            sendMessage={sendMessage}
-            pendingInviteCode={pendingInviteCode}
-            onClearInvite={() => setPendingInviteCode(null)}
+            themeAccent={colors.accent}
+            isConnected={isConnected}
+            pendingRequestsCount={friends.filter(f => f.status === 'pending_incoming').length}
           />
-        )}
 
-        {activeTab === 'chats' && (
-          <>
-            <div className="p-5 flex items-center justify-between">
-              <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Chats</h2>
-              <button
-                onClick={handleLogout}
-                className={`p-2 rounded-lg ${isDark ? 'hover:bg-gray-800 text-gray-400' : 'hover:bg-gray-200 text-gray-600'}`}
-                title="Logout"
-              >
-                <LogOut size={18} />
-              </button>
-            </div>
+          {/* 2nd Column: List View (Friends or Chats) */}
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.2 }}
+            className={`w-80 ${isDark ? 'bg-gray-900/50 border-gray-800' : 'bg-gray-50 border-gray-100'} border-r flex flex-col`}
+          >
+            {activeTab === 'friends' && (
+              <FriendsList
+                isDark={isDark}
+                currentUser={currentUser}
+                onNewChat={handleNewChat}
+                sendMessage={sendMessage}
+                pendingInviteCode={pendingInviteCode}
+                onClearInvite={() => setPendingInviteCode(null)}
+              />
+            )}
 
-            <div className="flex-1 overflow-y-auto">
-              {conversations.length === 0 && (
-                <div className="p-8 text-center space-y-2">
-                  <p className={`text-sm ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>No active pipelines</p>
+            {activeTab === 'chats' && (
+              <>
+                <div className="p-5 flex items-center justify-between">
+                  <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Chats</h2>
+                  <button
+                    onClick={handleLogout}
+                    className={`p-2 rounded-lg ${isDark ? 'hover:bg-gray-800 text-gray-400' : 'hover:bg-gray-200 text-gray-600'}`}
+                    title="Logout"
+                  >
+                    <LogOut size={18} />
+                  </button>
                 </div>
-              )}
-              {conversations.sort((a: any, b: any) => {
-                const ta = a.lastTimestamp instanceof Date ? a.lastTimestamp.getTime() : new Date(a.lastTimestamp).getTime()
-                const tb = b.lastTimestamp instanceof Date ? b.lastTimestamp.getTime() : new Date(b.lastTimestamp).getTime()
-                return tb - ta
-              }).map((conversation: any) => (
-                <ConversationList
-                  key={conversation.id}
-                  conversation={{
-                    ...conversation,
-                    lastTimestamp: conversation.lastTimestamp instanceof Date ? conversation.lastTimestamp : new Date(conversation.lastTimestamp)
-                  }}
-                  isSelected={selectedConversation === conversation.id}
-                  onSelect={() => {
-                    setSelectedConversation(conversation.id);
-                    db.conversations.update(conversation.id, { unreadCount: 0 });
-                  }}
+
+                <div className="flex-1 overflow-y-auto">
+                  {conversations.length === 0 && (
+                    <div className="p-8 text-center space-y-2">
+                      <p className={`text-sm ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>No active pipelines</p>
+                    </div>
+                  )}
+                  {conversations.sort((a: any, b: any) => {
+                    const ta = a.lastTimestamp instanceof Date ? a.lastTimestamp.getTime() : new Date(a.lastTimestamp).getTime()
+                    const tb = b.lastTimestamp instanceof Date ? b.lastTimestamp.getTime() : new Date(b.lastTimestamp).getTime()
+                    return tb - ta
+                  }).map((conversation: any) => (
+                    <ConversationList
+                      key={conversation.id}
+                      conversation={{
+                        ...conversation,
+                        lastTimestamp: conversation.lastTimestamp instanceof Date ? conversation.lastTimestamp : new Date(conversation.lastTimestamp)
+                      }}
+                      isSelected={selectedConversation === conversation.id}
+                      onSelect={() => {
+                        setSelectedConversation(conversation.id);
+                        db.conversations.update(conversation.id, { unreadCount: 0 });
+                      }}
+                      themeAccent={colors.accent}
+                      isDark={isDark}
+                      fontSize={fontSize}
+                      isOnline={presence[conversation.id] === 'online'}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+
+            {activeTab === 'settings' && (
+              <div className={`flex flex-col h-full ${isDark ? 'bg-gray-900' : 'bg-white'}`}>
+                <h2 className={`text-xl font-bold p-5 ${isDark ? 'text-white' : 'text-gray-900'}`}>Settings</h2>
+
+                <div className="flex-1 overflow-y-auto px-5 space-y-6">
+                  {/* Profile Summary in Sidebar */}
+                  <div className={`p-4 rounded-2xl flex items-center gap-4 ${isDark ? 'bg-gray-800/50' : 'bg-gray-50'}`}>
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl overflow-hidden ${isDark ? 'bg-gray-700' : 'bg-white shadow-sm'}`}>
+                      {currentUser?.avatar?.startsWith('data:image') ? (
+                        <img src={currentUser.avatar} alt="Me" className="w-full h-full object-cover" />
+                      ) : (
+                        currentUser?.avatar || '👤'
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`font-bold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{currentUser?.username}</p>
+                      <p className="text-[10px] text-gray-500 font-mono truncate">{currentUser?.uuid}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest px-1 mb-2 block">Application</span>
+                    <button
+                      onClick={() => setIsSettingsOpen(true)}
+                      className={`w-full flex items-center gap-3 p-3 rounded-xl ${isDark ? 'bg-gray-800 hover:bg-gray-700' : 'bg-white hover:bg-gray-100 border border-gray-100'} transition-colors shadow-sm`}
+                    >
+                      <Settings size={18} className="text-gray-400" />
+                      <span className="text-sm font-medium">Appearance & Themes</span>
+                    </button>
+                    <button
+                      onClick={handleLogout}
+                      className={`w-full flex items-center gap-3 p-3 rounded-xl ${isDark ? 'bg-gray-800 hover:bg-gray-700' : 'bg-white hover:bg-gray-100 border border-gray-100'} transition-colors shadow-sm text-red-500`}
+                    >
+                      <LogOut size={18} />
+                      <span className="text-sm font-medium">Logout Sessions</span>
+                    </button>
+                  </div>
+
+                  <div className="pt-4 text-center">
+                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-[0.2em]">Transparent Kakao v2.5</p>
+                    <p className="text-[9px] text-gray-400 mt-1">E2EE Protected • Stateless Pipeline</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </motion.div>
+
+          {/* Main Chat Area */}
+          <div className={`flex-1 flex flex-col ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+            {selectedConversation ? (
+              <>
+                {/* Chat Header */}
+                <ChatHeader
+                  name={conversations.find((c: any) => c.id === selectedConversation)?.username || 'Chat'}
+                  avatar={conversations.find((c: any) => c.id === selectedConversation)?.avatar || ''}
                   themeAccent={colors.accent}
                   isDark={isDark}
                   fontSize={fontSize}
-                  isOnline={presence[conversation.id] === 'online'}
-                />
-              ))}
-            </div>
-          </>
-        )}
-
-        {activeTab === 'settings' && (
-          <div className={`flex flex-col h-full ${isDark ? 'bg-gray-900' : 'bg-white'}`}>
-            <h2 className={`text-xl font-bold p-5 ${isDark ? 'text-white' : 'text-gray-900'}`}>Settings</h2>
-
-            <div className="flex-1 overflow-y-auto px-5 space-y-6">
-              {/* Profile Summary in Sidebar */}
-              <div className={`p-4 rounded-2xl flex items-center gap-4 ${isDark ? 'bg-gray-800/50' : 'bg-gray-50'}`}>
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl overflow-hidden ${isDark ? 'bg-gray-700' : 'bg-white shadow-sm'}`}>
-                  {currentUser?.avatar?.startsWith('data:image') ? (
-                    <img src={currentUser.avatar} alt="Me" className="w-full h-full object-cover" />
-                  ) : (
-                    currentUser?.avatar || '👤'
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className={`font-bold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{currentUser?.username}</p>
-                  <p className="text-[10px] text-gray-500 font-mono truncate">{currentUser?.uuid}</p>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest px-1 mb-2 block">Application</span>
-                <button
-                  onClick={() => setIsSettingsOpen(true)}
-                  className={`w-full flex items-center gap-3 p-3 rounded-xl ${isDark ? 'bg-gray-800 hover:bg-gray-700' : 'bg-white hover:bg-gray-100 border border-gray-100'} transition-colors shadow-sm`}
-                >
-                  <Settings size={18} className="text-gray-400" />
-                  <span className="text-sm font-medium">Appearance & Themes</span>
-                </button>
-                <button
-                  onClick={handleLogout}
-                  className={`w-full flex items-center gap-3 p-3 rounded-xl ${isDark ? 'bg-gray-800 hover:bg-gray-700' : 'bg-white hover:bg-gray-100 border border-gray-100'} transition-colors shadow-sm text-red-500`}
-                >
-                  <LogOut size={18} />
-                  <span className="text-sm font-medium">Logout Sessions</span>
-                </button>
-              </div>
-
-              <div className="pt-4 text-center">
-                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-[0.2em]">Transparent Kakao v2.5</p>
-                <p className="text-[9px] text-gray-400 mt-1">E2EE Protected • Stateless Pipeline</p>
-              </div>
-            </div>
-          </div>
-        )}
-      </motion.div>
-
-      {/* Main Chat Area */}
-      <div className={`flex-1 flex flex-col ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
-        {selectedConversation ? (
-          <>
-            {/* Chat Header */}
-            <ChatHeader
-              name={conversations.find((c: any) => c.id === selectedConversation)?.username || 'Chat'}
-              avatar={conversations.find((c: any) => c.id === selectedConversation)?.avatar || ''}
-              themeAccent={colors.accent}
-              isDark={isDark}
-              fontSize={fontSize}
-              secret={conversations.find((c: any) => c.id === selectedConversation)?.secret}
-              onSecretChange={handleSecretChange}
-              isOnline={presence[selectedConversation] === 'online'}
-              isGroup={conversations.find((c: any) => c.id === selectedConversation)?.isGroup}
-              participants={(conversations.find((c: any) => c.id === selectedConversation)?.participants || []) as any[]}
-              onVoiceCall={async () => {
-                if (selectedConversation) {
-                  await joinCall(selectedConversation, 'voice');
-                }
-              }}
-              onVideoCall={async () => {
-                if (selectedConversation) {
-                  await joinCall(selectedConversation, 'video');
-                }
-              }}
-            />
-
-            {/* Stranger Banner (O/X) */}
-            {(() => {
-              const friend = friends.find((f: any) => f.uuid === selectedConversation);
-              const isFriend = friend?.status === 'friend';
-              const conversation = conversations.find((c: any) => c.id === selectedConversation);
-              const isGroup = conversation?.isGroup;
-
-              if (selectedConversation && !isFriend && !isGroup) {
-                return (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    className={`px-6 py-4 border-b flex items-center justify-between z-10 ${isDark ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-blue-100 text-gray-900'} shadow-lg sticky top-0`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-xl ${isDark ? 'bg-gray-800' : 'bg-blue-50'}`}>
-                        <ShieldAlert size={20} className="text-blue-500" />
-                      </div>
-                      <div>
-                        <p className="text-[13px] font-black uppercase tracking-tight">Unknown Contact</p>
-                        <p className={`text-[11px] font-medium leading-tight ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                          Add this person to chat securely or block them to ignore.
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleAcceptFriend(selectedConversation)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all bg-blue-600 text-white hover:bg-blue-700 active:scale-95 shadow-md shadow-blue-500/20`}
-                      >
-                        <UserPlus size={14} />
-                        Add (O)
-                      </button>
-                      <button
-                        onClick={() => handleBlockUser(selectedConversation)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${isDark ? 'bg-gray-800 text-gray-400 hover:text-red-400' : 'bg-white text-gray-500 hover:text-red-500 border border-gray-200 shadow-sm'} active:scale-95`}
-                      >
-                        <ShieldAlert size={14} />
-                        Block (X)
-                      </button>
-                    </div>
-                  </motion.div>
-                );
-              }
-              return null;
-            })()}
-
-            {/* Messages */}
-            <div className={`flex-1 overflow-y-auto py-3 ${isDark ? 'bg-gray-900' : 'bg-[#B2C7D9]'}`}>
-              {processedMessages
-                .filter(item => {
-                  if (item.type === 'date') return true;
-                  // Hide decryption error messages
-                  return item.text !== DECRYPTION_ERROR_MSG && item.text !== NO_KEY_ERROR_MSG;
-                })
-                .map((item: any) => {
-                  // 날짜 구분선
-                  if (item.type === 'date') {
-                    return <DateDivider key={item.id} date={item.date} isDark={isDark} />
-                  }
-
-                  const conv = conversations.find((c: any) => c.id === selectedConversation)
-                  const isGroupChat = conv?.isGroup
-                  const isMyMsg = item.isEcho || item.from === currentUser?.uuid
-                  const senderFriend = friends.find((f: any) => f.uuid === item.from)
-
-                  return (
-                    <ChatMessage
-                      key={item.msgId || item.id}
-                      message={{
-                        id: item.msgId,
-                        text: item.text,
-                        sender: isMyMsg ? 'user' : 'other',
-                        timestamp: item.timestamp instanceof Date ? item.timestamp : new Date(item.timestamp),
-                        status: item.status,
-                        isEcho: item.isEcho,
-                        replyToText: item.replyToText,
-                        replyToSender: item.replyToSender,
-                        senderName: isMyMsg ? '나' : (senderFriend?.username || (item.from ? `User-${item.from.slice(0, 4)}` : '상대방')),
-                        senderAvatar: isMyMsg ? currentUser?.avatar : (senderFriend?.avatar || '👤'),
-                        type: isSystemMessage(item.text) ? 'system' : 'text',
-                      }}
-                      isDark={isDark}
-                      fontSize={fontSize}
-                      onReply={(msg) => setReplyingTo(msg)}
-                      isGroup={isGroupChat}
-                      isFirstInGroup={item._isFirst}
-                      isLastInGroup={item._isLast}
-                      showTime={item._isLast}
-                      showUnread={item._showUnread}
-                    />
-                  )
-                })}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Input Area */}
-            <div className={`px-3 py-3 border-t ${isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
-              {replyingTo && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`mb-2 px-3 py-2 rounded-xl border-l-4 flex items-center justify-between ${isDark ? 'bg-gray-700 border-purple-500' : 'bg-gray-50 border-purple-500'}`}
-                >
-                  <div className="flex-1 min-w-0 pr-3">
-                    <p className="text-[10px] font-bold text-purple-500 uppercase tracking-wider mb-0.5">답장</p>
-                    <p className={`text-xs truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                      {replyingTo.text}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setReplyingTo(null)}
-                    className={`p-1 rounded-full ${isDark ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-500'}`}
-                  >
-                    <XIcon size={14} />
-                  </button>
-                </motion.div>
-              )}
-              <div className="flex items-end gap-2">
-                <textarea
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage();
+                  secret={conversations.find((c: any) => c.id === selectedConversation)?.secret}
+                  onSecretChange={handleSecretChange}
+                  isOnline={presence[selectedConversation] === 'online'}
+                  isGroup={conversations.find((c: any) => c.id === selectedConversation)?.isGroup}
+                  participants={(conversations.find((c: any) => c.id === selectedConversation)?.participants || []) as any[]}
+                  onVoiceCall={async () => {
+                    if (selectedConversation) {
+                      await joinCall(selectedConversation, 'voice');
                     }
                   }}
-                  placeholder="메시지 입력..."
-                  rows={1}
-                  className={`flex-1 px-4 py-2.5 border rounded-2xl focus:outline-none transition-all resize-none overflow-y-auto max-h-28 ${isDark
-                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-500 focus:border-gray-500'
-                    : 'bg-gray-100 border-transparent text-gray-800 placeholder-gray-400 focus:bg-white focus:border-gray-300'
-                    }`}
+                  onVideoCall={async () => {
+                    if (selectedConversation) {
+                      await joinCall(selectedConversation, 'video');
+                    }
+                  }}
                 />
-                <button
-                  onClick={handleSendMessage}
-                  disabled={!inputValue.trim()}
-                  className={`p-2.5 bg-gradient-to-r ${colors.bg} text-white rounded-full hover:opacity-90 active:scale-95 transition-all flex items-center justify-center flex-shrink-0 disabled:opacity-40`}
-                >
-                  <Send size={18} />
-                </button>
+
+                {/* Stranger Banner (O/X) */}
+                {(() => {
+                  const friend = friends.find((f: any) => f.uuid === selectedConversation);
+                  const isFriend = friend?.status === 'friend';
+                  const conversation = conversations.find((c: any) => c.id === selectedConversation);
+                  const isGroup = conversation?.isGroup;
+
+                  if (selectedConversation && !isFriend && !isGroup) {
+                    return (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        className={`px-6 py-4 border-b flex items-center justify-between z-10 ${isDark ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-blue-100 text-gray-900'} shadow-lg sticky top-0`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-xl ${isDark ? 'bg-gray-800' : 'bg-blue-50'}`}>
+                            <ShieldAlert size={20} className="text-blue-500" />
+                          </div>
+                          <div>
+                            <p className="text-[13px] font-black uppercase tracking-tight">Unknown Contact</p>
+                            <p className={`text-[11px] font-medium leading-tight ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                              Add this person to chat securely or block them to ignore.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleAcceptFriend(selectedConversation)}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all bg-blue-600 text-white hover:bg-blue-700 active:scale-95 shadow-md shadow-blue-500/20`}
+                          >
+                            <UserPlus size={14} />
+                            Add (O)
+                          </button>
+                          <button
+                            onClick={() => handleBlockUser(selectedConversation)}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${isDark ? 'bg-gray-800 text-gray-400 hover:text-red-400' : 'bg-white text-gray-500 hover:text-red-500 border border-gray-200 shadow-sm'} active:scale-95`}
+                          >
+                            <ShieldAlert size={14} />
+                            Block (X)
+                          </button>
+                        </div>
+                      </motion.div>
+                    );
+                  }
+                  return null;
+                })()}
+
+                {/* Messages */}
+                <div className={`flex-1 overflow-y-auto py-3 ${isDark ? 'bg-gray-900' : 'bg-[#B2C7D9]'}`}>
+                  {processedMessages
+                    .filter(item => {
+                      if (item.type === 'date') return true;
+                      // Hide decryption error messages
+                      return item.text !== DECRYPTION_ERROR_MSG && item.text !== NO_KEY_ERROR_MSG;
+                    })
+                    .map((item: any) => {
+                      // 날짜 구분선
+                      if (item.type === 'date') {
+                        return <DateDivider key={item.id} date={item.date} isDark={isDark} />
+                      }
+
+                      const conv = conversations.find((c: any) => c.id === selectedConversation)
+                      const isGroupChat = conv?.isGroup
+                      const isMyMsg = item.isEcho || item.from === currentUser?.uuid
+                      const senderFriend = friends.find((f: any) => f.uuid === item.from)
+
+                      return (
+                        <ChatMessage
+                          key={item.msgId || item.id}
+                          message={{
+                            id: item.msgId,
+                            text: item.text,
+                            sender: isMyMsg ? 'user' : 'other',
+                            timestamp: item.timestamp instanceof Date ? item.timestamp : new Date(item.timestamp),
+                            status: item.status,
+                            isEcho: item.isEcho,
+                            replyToText: item.replyToText,
+                            replyToSender: item.replyToSender,
+                            senderName: isMyMsg ? '나' : (senderFriend?.username || (item.from ? `User-${item.from.slice(0, 4)}` : '상대방')),
+                            senderAvatar: isMyMsg ? currentUser?.avatar : (senderFriend?.avatar || '👤'),
+                            type: isSystemMessage(item.text) ? 'system' : 'text',
+                          }}
+                          isDark={isDark}
+                          fontSize={fontSize}
+                          onReply={(msg) => setReplyingTo(msg)}
+                          isGroup={isGroupChat}
+                          isFirstInGroup={item._isFirst}
+                          isLastInGroup={item._isLast}
+                          showTime={item._isLast}
+                          showUnread={item._showUnread}
+                        />
+                      )
+                    })}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                {/* Input Area */}
+                <div className={`px-3 py-3 border-t ${isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
+                  {replyingTo && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`mb-2 px-3 py-2 rounded-xl border-l-4 flex items-center justify-between ${isDark ? 'bg-gray-700 border-purple-500' : 'bg-gray-50 border-purple-500'}`}
+                    >
+                      <div className="flex-1 min-w-0 pr-3">
+                        <p className="text-[10px] font-bold text-purple-500 uppercase tracking-wider mb-0.5">답장</p>
+                        <p className={`text-xs truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                          {replyingTo.text}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setReplyingTo(null)}
+                        className={`p-1 rounded-full ${isDark ? 'hover:bg-gray-600 text-gray-400' : 'hover:bg-gray-200 text-gray-500'}`}
+                      >
+                        <XIcon size={14} />
+                      </button>
+                    </motion.div>
+                  )}
+                  <div className="flex items-end gap-2">
+                    <textarea
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                      }}
+                      placeholder="메시지 입력..."
+                      rows={1}
+                      className={`flex-1 px-4 py-2.5 border rounded-2xl focus:outline-none transition-all resize-none overflow-y-auto max-h-28 ${isDark
+                        ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-500 focus:border-gray-500'
+                        : 'bg-gray-100 border-transparent text-gray-800 placeholder-gray-400 focus:bg-white focus:border-gray-300'
+                        }`}
+                    />
+                    <button
+                      onClick={handleSendMessage}
+                      disabled={!inputValue.trim()}
+                      className={`p-2.5 bg-gradient-to-r ${colors.bg} text-white rounded-full hover:opacity-90 active:scale-95 transition-all flex items-center justify-center flex-shrink-0 disabled:opacity-40`}
+                    >
+                      <Send size={18} />
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-center p-12">
+                <div className="max-w-xs space-y-4">
+                  <div className={`w-16 h-16 rounded-2xl bg-purple-500/10 flex items-center justify-center text-purple-500 mx-auto`}>
+                    <LockIcon size={32} />
+                  </div>
+                  <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Select a Channel</h2>
+                  <p className={`text-sm ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                    All messages in this pipeline are protected by Argon2 key derivation and AES-GCM encryption.
+                  </p>
+                </div>
               </div>
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-center p-12">
-            <div className="max-w-xs space-y-4">
-              <div className={`w-16 h-16 rounded-2xl bg-purple-500/10 flex items-center justify-center text-purple-500 mx-auto`}>
-                <LockIcon size={32} />
-              </div>
-              <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Select a Channel</h2>
-              <p className={`text-sm ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                All messages in this pipeline are protected by Argon2 key derivation and AES-GCM encryption.
-              </p>
-            </div>
+            )}
           </div>
-        )}
-      </div>
 
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        currentTheme={theme}
-        onThemeChange={setTheme}
-        isDark={isDark}
-        onToggleDark={() => setIsDark(!isDark)}
-        fontSize={fontSize}
-        onFontSizeChange={setFontSize}
-        fontFamily={fontFamily}
-        onFontFamilyChange={setFontFamily}
-        avatar={currentUser?.avatar}
-        onUpdateAvatar={handleUpdateAvatar}
-      />
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            currentTheme={theme}
+            onThemeChange={setTheme}
+            isDark={isDark}
+            onToggleDark={() => setIsDark(!isDark)}
+            fontSize={fontSize}
+            onFontSizeChange={setFontSize}
+            fontFamily={fontFamily}
+            onFontFamilyChange={setFontFamily}
+            avatar={currentUser?.avatar}
+            onUpdateAvatar={handleUpdateAvatar}
+          />
 
-      {/* Call UI */}
-      {/* Call UI */}
-      <CallOverlay
-        isOpen={isCallActive}
-        callType={isCameraOn ? 'video' : 'voice'}
-        peers={Object.entries(peers).reduce((acc, [uuid, peer]) => {
-          const friend = friends.find((f: any) => f.uuid === uuid);
-          const conv = conversations.find((c: any) => c.id === uuid);
-          // For group members, we need to find them in the participants list of the group conversation
-          // This is a bit complex if we are in a group call but don't know WHICH group it is easily without tracking it separately 
-          // (though activeGroupIdRef is internal).
-          // But here we can try to look up in friends or conversations.
-          // Or we can try to find them in the currently selected conversation if it matches?
-          // Fallback: Unknown
+          {/* Call UI */}
+          {/* Call UI */}
+          <CallOverlay
+            isOpen={isCallActive}
+            callType={isCameraOn ? 'video' : 'voice'}
+            peers={Object.entries(peers).reduce((acc, [uuid, peer]) => {
+              const friend = friends.find((f: any) => f.uuid === uuid);
+              const conv = conversations.find((c: any) => c.id === uuid);
+              // For group members, we need to find them in the participants list of the group conversation
+              // This is a bit complex if we are in a group call but don't know WHICH group it is easily without tracking it separately 
+              // (though activeGroupIdRef is internal).
+              // But here we can try to look up in friends or conversations.
+              // Or we can try to find them in the currently selected conversation if it matches?
+              // Fallback: Unknown
 
-          acc[uuid] = {
-            ...peer,
-            username: friend?.username || conv?.username || `User ${uuid.slice(0, 4)}`,
-            avatar: friend?.avatar || conv?.avatar
-          };
-          return acc;
-        }, {} as any)}
-        localStream={localStream}
-        isMuted={isCallMuted}
-        isCameraOn={isCameraOn}
-        isLocalSpeaking={false} // Todo: expose from hook
-        onToggleMute={toggleMute}
-        onToggleCamera={toggleCamera}
-        onLeave={leaveCall}
-        isDark={isDark}
-        groupName={conversations.find((c: any) => c.id === (selectedConversation))?.username || 'Group Call'}
-      />
+              acc[uuid] = {
+                ...(peer as any),
+                username: friend?.username || conv?.username || `User ${uuid.slice(0, 4)}`,
+                avatar: friend?.avatar || conv?.avatar
+              };
+              return acc;
+            }, {} as any)}
+            localStream={localStream}
+            isMuted={isCallMuted}
+            isCameraOn={isCameraOn}
+            isLocalSpeaking={false} // Todo: expose from hook
+            onToggleMute={toggleMute}
+            onToggleCamera={toggleCamera}
+            onLeave={leaveCall}
+            isDark={isDark}
+            groupName={conversations.find((c: any) => c.id === (selectedConversation))?.username || 'Group Call'}
+          />
 
-      <IncomingCallDialog
-        isOpen={!!webRTCIncomingCall}
-        callerName={conversations.find((c: any) => c.id === webRTCIncomingCall?.from)?.username || friends.find((f: any) => f.uuid === webRTCIncomingCall?.from)?.username || 'Unknown Caller'}
-        callerAvatar={conversations.find((c: any) => c.id === webRTCIncomingCall?.from)?.avatar || friends.find((f: any) => f.uuid === webRTCIncomingCall?.from)?.avatar}
-        onAccept={async () => {
-          if (webRTCIncomingCall) {
-            await acceptCall();
-          }
-        }}
-        onReject={() => {
-          rejectCall();
-        }}
-        isDark={isDark}
-        callType={webRTCIncomingCall?.type || 'video'}
-      />
-    </div >
+          <IncomingCallDialog
+            isOpen={!!webRTCIncomingCall}
+            callerName={conversations.find((c: any) => c.id === webRTCIncomingCall?.from)?.username || friends.find((f: any) => f.uuid === webRTCIncomingCall?.from)?.username || 'Unknown Caller'}
+            callerAvatar={conversations.find((c: any) => c.id === webRTCIncomingCall?.from)?.avatar || friends.find((f: any) => f.uuid === webRTCIncomingCall?.from)?.avatar}
+            onAccept={async () => {
+              if (webRTCIncomingCall) {
+                await acceptCall();
+              }
+            }}
+            onReject={() => {
+              rejectCall();
+            }}
+            isDark={isDark}
+            callType={webRTCIncomingCall?.type || 'video'}
+          />
+        </div >
+      </StreamVideo>
+    </Chat>
   )
 }

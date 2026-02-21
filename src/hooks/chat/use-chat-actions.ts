@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { getSocket } from '@/lib/socket';
 import { db } from '@/lib/db';
+import { useChatContext } from 'stream-chat-react';
 import {
     encryptMessage,
     deriveKeyFromSecret,
@@ -14,6 +15,7 @@ export function useChatActions(
     encryptionKey: Uint8Array | null,
     user: { username: string; avatar?: string } | null
 ) {
+    const { client: chatClient } = useChatContext();
     const sendMessage = useCallback(async (
         toUuid: string,
         text: string,
@@ -112,6 +114,20 @@ export function useChatActions(
                     }
 
                     socket.emit('relay', { to: participantUuid, payload: Array.from(finalPayload), msgId });
+
+                    // Also send via GetStream
+                    if (chatClient) {
+                        const channel = chatClient.channel('messaging', {
+                            members: [currentUserUuid, participantUuid],
+                        });
+                        await channel.watch();
+                        await channel.sendMessage({
+                            text: 'E2EE_ENCRYPTED_MESSAGE',
+                            custom_payload: Array.from(finalPayload),
+                            msgId
+                        } as any);
+                        console.log(`📡 [Stream] Message sent to ${participantUuid}`);
+                    }
                 } catch (err) {
                     console.error(`Failed to send to participant ${participantUuid}:`, err);
                 }

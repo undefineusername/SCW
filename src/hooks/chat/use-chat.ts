@@ -27,7 +27,7 @@ export function useChat(
     const { sendMessage, markAsRead } = useChatActions(currentUserUuid, encryptionKey, user);
 
     // 2. Socket & Message Processing
-    const { isConnected } = useChatSocket(
+    const { isConnected, streamTokens } = useChatSocket(
         user,
         selectedConversationUuid,
         sendMessage,
@@ -64,5 +64,5 @@ export function useChat(
         }
     }, [selectedConversationUuid, currentUserUuid, markAsRead, sendMessage]);
 
-    return { isConnected, conversations, sendMessage, presence };
+    return { isConnected, conversations, sendMessage, presence, streamTokens };
 }
