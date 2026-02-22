@@ -149,49 +149,68 @@ export default function App() {
     setCurrentUser(null);
   };
 
-  const colors = themeColors[theme]
-
   if (!currentUser) {
     return <AuthScreen isDark={isDark} onAuthenticated={handleAuthenticated} />;
   }
 
-  if (!chatClient || !videoClient) {
-    return (
-      <div className={`flex h-screen items-center justify-center ${isDark ? 'bg-gray-950 text-white' : 'bg-white text-gray-900'}`}>
-        <div className="flex flex-col items-center space-y-4">
-          <div className={`w-12 h-12 border-4 ${colors.accent === 'purple-500' ? 'border-purple-500' : 'border-blue-500'} border-t-transparent rounded-full animate-spin`}></div>
-          <p className="animate-pulse font-medium">Initializing secure streams...</p>
-        </div>
-      </div>
-    );
-  }
+  // Debug: Track Stream state
+  useEffect(() => {
+    if (!streamTokensState) {
+      console.log('⏳ [App] Waiting for Stream tokens from socket...');
+    } else {
+      console.log('✅ [App] Stream tokens received, initializing clients...');
+    }
+  }, [streamTokensState]);
+
+  useEffect(() => {
+    if (chatClient) console.log('✅ [App] StreamChat client ready');
+    if (videoClient) console.log('✅ [App] StreamVideo client ready');
+  }, [chatClient, videoClient]);
+
+  // Wrap content with optional providers
+  const appContent = (
+    <AuthenticatedApp
+      currentUser={currentUser}
+      videoClient={videoClient}
+      isConnected={isConnected}
+      sendMessage={sendMessage}
+      presence={presence}
+      onCallEnded={onCallEnded}
+      isDark={isDark}
+      setIsDark={setIsDark}
+      theme={theme}
+      setTheme={setTheme}
+      fontSize={fontSize}
+      setFontSize={setFontSize}
+      fontFamily={fontFamily}
+      setFontFamily={setFontFamily}
+      selectedConversation={selectedConversation}
+      setSelectedConversation={setSelectedConversation}
+      handleLogout={handleLogout}
+      handleUpdateAvatar={handleUpdateAvatar}
+    />
+  );
 
   return (
-    <Chat client={chatClient}>
-      <StreamVideo client={videoClient}>
-        <AuthenticatedApp
-          currentUser={currentUser}
-          videoClient={videoClient}
-          isConnected={isConnected}
-          sendMessage={sendMessage}
-          presence={presence}
-          onCallEnded={onCallEnded}
-          isDark={isDark}
-          setIsDark={setIsDark}
-          theme={theme}
-          setTheme={setTheme}
-          fontSize={fontSize}
-          setFontSize={setFontSize}
-          fontFamily={fontFamily}
-          setFontFamily={setFontFamily}
-          selectedConversation={selectedConversation}
-          setSelectedConversation={setSelectedConversation}
-          handleLogout={handleLogout}
-          handleUpdateAvatar={handleUpdateAvatar}
-        />
-      </StreamVideo>
-    </Chat>
+    <MaybeChat client={chatClient}>
+      <MaybeStreamVideo client={videoClient}>
+        {appContent}
+      </MaybeStreamVideo>
+    </MaybeChat>
   );
+}
+
+/**
+ * Helper components to allow app to function even if Stream clients are not (yet) available.
+ */
+function MaybeChat({ client, children }: { client: any, children: React.ReactNode }) {
+  if (!client) return <>{children}</>;
+  return <Chat client={client}>{children}</Chat>;
+}
+
+function MaybeStreamVideo({ client, children }: { client: any, children: React.ReactNode }) {
+  if (!client) return <>{children}</>;
+  return <StreamVideo client={client}>{children}</StreamVideo>;
 }
 
 interface AuthenticatedAppProps {
@@ -220,7 +239,7 @@ function AuthenticatedApp(props: AuthenticatedAppProps) {
 
   const content = <AuthenticatedAppContent {...props} streamCall={streamCall} />;
 
-  if (streamCall.activeCall) {
+  if (streamCall?.activeCall) {
     return (
       <StreamCall call={streamCall.activeCall}>
         {content}
