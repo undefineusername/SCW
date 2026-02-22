@@ -57,7 +57,11 @@ export function useStreamVideoCall(currentUserUuid: string | null, videoClient?:
             // Enable devices BEFORE join so remote peer receives our stream
             await call.microphone.enable();
             if (streamType === 'default') {
-                await call.camera.enable();
+                try {
+                    await call.camera.enable();
+                } catch (e) {
+                    console.warn('⚠️ [StreamVideo] Camera enable failed (no send-video permission?), continuing with audio:', e);
+                }
             }
             await call.join();
             setActiveCall(call);
@@ -72,7 +76,11 @@ export function useStreamVideoCall(currentUserUuid: string | null, videoClient?:
             // Enable devices BEFORE join so remote peer receives our stream
             await call.microphone.enable();
             if (call.type === 'default') {
-                await call.camera.enable();
+                try {
+                    await call.camera.enable();
+                } catch (e) {
+                    console.warn('⚠️ [StreamVideo] Camera enable failed, continuing with audio:', e);
+                }
             }
             await call.join();
             setActiveCall(call);

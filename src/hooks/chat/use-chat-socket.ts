@@ -21,6 +21,7 @@ export function useChatSocket(
     chatClient?: StreamChat | null
 ) {
     const [isConnected, setIsConnected] = useState(false);
+    const [isRegistered, setIsRegistered] = useState(false);
     const [streamTokens, setStreamTokens] = useState<{ apiKey: string; chatToken: string; videoToken: string } | null>(null);
     const currentUserUuid = user?.uuid || null;
     const encryptionKey = user?.key || null;
@@ -55,8 +56,13 @@ export function useChatSocket(
             socketRef.current = socket;
 
             setIsConnected(socket.connected);
+            setIsRegistered(false);
             const onConnect = () => setIsConnected(true);
-            const onDisconnect = () => setIsConnected(false);
+            const onDisconnect = () => {
+                setIsConnected(false);
+                setIsRegistered(false);
+            };
+            const onRegistered = () => setIsRegistered(true);
 
             const handleKeyUpdate = async (uuid: string, publicKey: any) => {
                 if (publicKey && uuid !== currentUserUuid) {
@@ -224,6 +230,7 @@ export function useChatSocket(
 
             socket.on('connect', onConnect);
             socket.on('disconnect', onDisconnect);
+            socket.on('registered', onRegistered);
             socket.on('relay_push', onRawPush);
             socket.on('queue_flush', async (payloads: any[]) => { for (const p of payloads) await onRawPush(p); });
             socket.on('presence_update', async ({ uuid, status, publicKey }: any) => {
@@ -280,5 +287,5 @@ export function useChatSocket(
         return () => { chatClient.off('message.new', streamHandler); };
     }, [chatClient, currentUserUuid]);
 
-    return { isConnected, streamTokens };
+    return { isConnected, isRegistered, streamTokens };
 }

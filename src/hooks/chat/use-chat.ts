@@ -35,7 +35,7 @@ export function useChat(
     markAsReadRef.current = markAsRead;
 
     // 2. Socket & Message Processing
-    const { isConnected, streamTokens } = useChatSocket(
+    const { isConnected, isRegistered, streamTokens } = useChatSocket(
         user,
         selectedConversationUuid,
         sendMessage,
@@ -68,21 +68,20 @@ export function useChat(
     // 4. DH Key Management
     useChatKeys(currentUserUuid, isConnected, user);
 
-    // 5. Auto-Mark as Read and Initial E2EE Handshake
-    // Refs are used so this only triggers on conversation/user change, not every sendMessage recreation
+    // 5. Auto-Mark as Read and Initial E2EE Handshake (only after registered to avoid "Not authenticated")
     useEffect(() => {
-        if (!selectedConversationUuid || !currentUserUuid) return;
+        if (!selectedConversationUuid || !currentUserUuid || !isRegistered) return;
 
         markAsReadRef.current(selectedConversationUuid);
 
-        const conv = conversations.find(c => c.id === selectedConversationUuid);
+        const conv = (conversations ?? []).find(c => c.id === selectedConversationUuid);
         if (!conv?.isGroup) {
             sendMessageRef.current(selectedConversationUuid, JSON.stringify({
                 system: true,
                 type: 'E2EE_PING'
             }));
         }
-    }, [selectedConversationUuid, currentUserUuid]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [selectedConversationUuid, currentUserUuid, isRegistered]); // eslint-disable-line react-hooks/exhaustive-deps
 
     return { isConnected, conversations, sendMessage, presence, streamTokens };
 }

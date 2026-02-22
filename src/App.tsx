@@ -368,7 +368,7 @@ function AuthenticatedAppContent({
       const replyMetadata = replyingTo ? {
         id: replyingTo.id,
         text: replyingTo.text,
-        sender: replyingTo.isEcho ? '나' : (conversations.find((c: any) => c.id === selectedConversation)?.username || '상대방')
+        sender: replyingTo.isEcho ? '나' : ((conversations ?? []).find((c: any) => c.id === selectedConversation)?.username || '상대방')
       } : undefined;
       await sendMessage(selectedConversation, inputValue, replyMetadata);
       setInputValue('')
@@ -443,7 +443,7 @@ function AuthenticatedAppContent({
 
   const handleAcceptFriend = async (uuid: string) => {
     const friend = await db.friends.get(uuid);
-    const username = friend?.username || conversations.find((c: any) => c.id === uuid)?.username || 'Unknown';
+    const username = friend?.username || (conversations ?? []).find((c: any) => c.id === uuid)?.username || 'Unknown';
     await db.friends.put({ uuid, username, status: 'friend', isBlocked: false });
     await sendMessage(uuid, JSON.stringify({ system: true, type: 'FRIEND_ACCEPT', username: currentUser?.username }));
     await sendMessage(uuid, JSON.stringify({ system: true, type: 'E2EE_PING', username: currentUser?.username }));
@@ -471,7 +471,7 @@ function AuthenticatedAppContent({
         isDark={isDark}
         themeAccent={colors.accent}
         isConnected={isConnected}
-        pendingRequestsCount={friends.filter(f => f.status === 'pending_incoming').length}
+        pendingRequestsCount={(friends ?? []).filter(f => f.status === 'pending_incoming').length}
       />
 
       {/* 2nd Column: List View (Friends or Chats) */}
@@ -507,12 +507,12 @@ function AuthenticatedAppContent({
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              {conversations.length === 0 && (
+              {(conversations ?? []).length === 0 && (
                 <div className="p-8 text-center space-y-2">
                   <p className={`text-sm ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>No active pipelines</p>
                 </div>
               )}
-              {conversations.sort((a: any, b: any) => {
+              {(conversations ?? []).sort((a: any, b: any) => {
                 const ta = a.lastTimestamp instanceof Date ? a.lastTimestamp.getTime() : new Date(a.lastTimestamp).getTime()
                 const tb = b.lastTimestamp instanceof Date ? b.lastTimestamp.getTime() : new Date(b.lastTimestamp).getTime()
                 return tb - ta
@@ -589,16 +589,16 @@ function AuthenticatedAppContent({
         {selectedConversation ? (
           <>
             <ChatHeader
-              name={conversations.find((c: any) => c.id === selectedConversation)?.username || 'Chat'}
-              avatar={conversations.find((c: any) => c.id === selectedConversation)?.avatar || ''}
+              name={(conversations ?? []).find((c: any) => c.id === selectedConversation)?.username || 'Chat'}
+              avatar={(conversations ?? []).find((c: any) => c.id === selectedConversation)?.avatar || ''}
               themeAccent={colors.accent}
               isDark={isDark}
               fontSize={fontSize}
-              secret={conversations.find((c: any) => c.id === selectedConversation)?.secret}
+              secret={(conversations ?? []).find((c: any) => c.id === selectedConversation)?.secret}
               onSecretChange={handleSecretChange}
               isOnline={presence[selectedConversation] === 'online'}
-              isGroup={conversations.find((c: any) => c.id === selectedConversation)?.isGroup}
-              participants={(conversations.find((c: any) => c.id === selectedConversation)?.participants || []) as any[]}
+              isGroup={(conversations ?? []).find((c: any) => c.id === selectedConversation)?.isGroup}
+              participants={((conversations ?? []).find((c: any) => c.id === selectedConversation)?.participants || []) as any[]}
               onVoiceCall={async () => {
                 if (selectedConversation) {
                   await joinCall(selectedConversation, 'voice');
@@ -612,9 +612,9 @@ function AuthenticatedAppContent({
             />
 
             {(() => {
-              const friend = friends.find((f: any) => f.uuid === selectedConversation);
+              const friend = (friends ?? []).find((f: any) => f.uuid === selectedConversation);
               const isFriend = friend?.status === 'friend';
-              const conversation = conversations.find((c: any) => c.id === selectedConversation);
+              const conversation = (conversations ?? []).find((c: any) => c.id === selectedConversation);
               const isGroup = conversation?.isGroup;
 
               if (selectedConversation && !isFriend && !isGroup) {
@@ -667,10 +667,10 @@ function AuthenticatedAppContent({
                   if (item.type === 'date') {
                     return <DateDivider key={item.id} date={item.date} isDark={isDark} />
                   }
-                  const conv = conversations.find((c: any) => c.id === selectedConversation)
+                  const conv = (conversations ?? []).find((c: any) => c.id === selectedConversation)
                   const isGroupChat = conv?.isGroup
                   const isMyMsg = item.isEcho || item.from === currentUser?.uuid
-                  const senderFriend = friends.find((f: any) => f.uuid === item.from)
+                  const senderFriend = (friends ?? []).find((f: any) => f.uuid === item.from)
                   return (
                     <ChatMessage
                       key={item.msgId || item.id}
@@ -784,8 +784,8 @@ function AuthenticatedAppContent({
         isOpen={isCallActive}
         callType={isCameraOn ? 'video' : 'voice'}
         peers={Object.entries(peers).reduce((acc, [uuid, peer]) => {
-          const friend = friends.find((f: any) => f.uuid === uuid);
-          const conv = conversations.find((c: any) => c.id === uuid);
+          const friend = (friends ?? []).find((f: any) => f.uuid === uuid);
+          const conv = (conversations ?? []).find((c: any) => c.id === uuid);
           acc[uuid] = {
             ...(peer as any),
             username: friend?.username || conv?.username || `User ${uuid.slice(0, 4)}`,
@@ -801,13 +801,13 @@ function AuthenticatedAppContent({
         onToggleCamera={toggleCamera}
         onLeave={leaveCall}
         isDark={isDark}
-        groupName={conversations.find((c: any) => c.id === (selectedConversation))?.username || 'Group Call'}
+        groupName={(conversations ?? []).find((c: any) => c.id === (selectedConversation))?.username || 'Group Call'}
       />
 
       <IncomingCallDialog
         isOpen={!!webRTCIncomingCall}
-        callerName={conversations.find((c: any) => c.id === webRTCIncomingCall?.from)?.username || friends.find((f: any) => f.uuid === webRTCIncomingCall?.from)?.username || 'Unknown Caller'}
-        callerAvatar={conversations.find((c: any) => c.id === webRTCIncomingCall?.from)?.avatar || friends.find((f: any) => f.uuid === webRTCIncomingCall?.from)?.avatar}
+        callerName={(conversations ?? []).find((c: any) => c.id === webRTCIncomingCall?.from)?.username || (friends ?? []).find((f: any) => f.uuid === webRTCIncomingCall?.from)?.username || 'Unknown Caller'}
+        callerAvatar={(conversations ?? []).find((c: any) => c.id === webRTCIncomingCall?.from)?.avatar || (friends ?? []).find((f: any) => f.uuid === webRTCIncomingCall?.from)?.avatar}
         onAccept={async () => {
           if (webRTCIncomingCall) {
             await acceptCall();
