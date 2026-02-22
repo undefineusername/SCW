@@ -118,15 +118,33 @@ export default function App() {
     currentUser,
     selectedConversation,
     chatClient,
-    undefined, // No signal handler needed
-    undefined  // No participants list handler needed
+    undefined,
+    undefined
   );
 
+  // Sync stream tokens into state — only when they actually change (prevents loop)
+  const streamTokensKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (streamTokens) {
-      setStreamTokensState(streamTokens);
-    }
+    if (!streamTokens) return;
+    const key = streamTokens.chatToken;
+    if (key === streamTokensKeyRef.current) return;
+    streamTokensKeyRef.current = key;
+    setStreamTokensState(streamTokens);
   }, [streamTokens]);
+
+  // Debug logs (safe — no state updates)
+  useEffect(() => {
+    if (!streamTokensState) {
+      console.log('⏳ [App] Waiting for Stream tokens from socket...');
+    } else {
+      console.log('✅ [App] Stream tokens received, initializing clients...');
+    }
+  }, [streamTokensState]);
+
+  useEffect(() => {
+    if (chatClient) console.log('✅ [App] StreamChat client ready');
+    if (videoClient) console.log('✅ [App] StreamVideo client ready');
+  }, [chatClient, videoClient]);
 
   const onCallEnded = useMemo(() => (groupId: string, type: string, duration: number) => {
     const typeStr = type === 'video' ? '영상통화' : '음성통화';
@@ -153,21 +171,7 @@ export default function App() {
     return <AuthScreen isDark={isDark} onAuthenticated={handleAuthenticated} />;
   }
 
-  // Debug: Track Stream state
-  useEffect(() => {
-    if (!streamTokensState) {
-      console.log('⏳ [App] Waiting for Stream tokens from socket...');
-    } else {
-      console.log('✅ [App] Stream tokens received, initializing clients...');
-    }
-  }, [streamTokensState]);
-
-  useEffect(() => {
-    if (chatClient) console.log('✅ [App] StreamChat client ready');
-    if (videoClient) console.log('✅ [App] StreamVideo client ready');
-  }, [chatClient, videoClient]);
-
-  // Wrap content with optional providers
+  // Wrap content with optional Stream providers
   const appContent = (
     <AuthenticatedApp
       currentUser={currentUser}

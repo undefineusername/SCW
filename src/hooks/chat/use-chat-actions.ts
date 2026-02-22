@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { getSocket } from '@/lib/socket';
 import { db } from '@/lib/db';
 import { StreamChat } from 'stream-chat';
@@ -16,6 +16,13 @@ export function useChatActions(
     user: { username: string; avatar?: string } | null,
     chatClient?: StreamChat | null
 ) {
+    // Keep user in a ref so sendMessage doesn't need to re-create when user object reference changes
+    const userRef = useRef(user);
+    userRef.current = user;
+
+    const chatClientRef = useRef(chatClient);
+    chatClientRef.current = chatClient;
+
     const sendMessage = useCallback(async (
         toUuid: string,
         text: string,
@@ -47,8 +54,8 @@ export function useChatActions(
                 // For system messages, automatically inject current user's profile info
                 try {
                     const parsed = JSON.parse(text);
-                    parsed.username = user!.username;
-                    parsed.avatar = user!.avatar;
+                    parsed.username = userRef.current?.username;
+                    parsed.avatar = userRef.current?.avatar;
                     jsonPayload = JSON.stringify(parsed);
                 } catch (e) {
                     jsonPayload = text;
@@ -116,8 +123,8 @@ export function useChatActions(
                     socket.emit('relay', { to: participantUuid, payload: Array.from(finalPayload), msgId });
 
                     // Also send via GetStream
-                    if (chatClient) {
-                        const channel = chatClient.channel('messaging', {
+                    if (chatClientRef.current) {
+                        const channel = chatClientRef.current.channel('messaging', {
                             members: [currentUserUuid, participantUuid],
                         });
                         await channel.watch();
@@ -159,7 +166,7 @@ export function useChatActions(
             console.error('Send message failed:', err);
             await db.messages.where('msgId').equals(msgId).modify({ status: 'failed' });
         }
-    }, [currentUserUuid, encryptionKey, user]);
+    }, [currentUserUuid, encryptionKey]); // 'user' and 'chatClient' removed — read via refs
 
     const markAsRead = useCallback(async (selectedConversationUuid: string) => {
         if (!selectedConversationUuid || !currentUserUuid) return;
