@@ -1,27 +1,37 @@
-import { StreamVideoClient } from '@stream-io/video-react-sdk';
-import { useStreamVideoCall } from '../stream/use-stream-video-call';
-export type { CallType } from './use-webrtc'; // Keep types for now
+import { StreamVideoClient, useCallStateHooks } from '@stream-io/video-react-sdk';
+export type { CallType } from './use-webrtc';
 
-export const useCall = (currentUserUuid: string | null, videoClient?: StreamVideoClient | null, _onCallStarted?: any, _onCallEnded?: any) => {
-    const streamCall = useStreamVideoCall(currentUserUuid, videoClient);
+export const useCall = (
+    _currentUserUuid: string | null,
+    _videoClient?: StreamVideoClient | null,
+    streamCall?: any,
+    _onCallStarted?: any,
+    _onCallEnded?: any
+) => {
+    // We now receive streamCall from the parent to ensure it's within the StreamCall context if needed
+
+    // Get reactive state from Stream Call hooks
+    const { useLocalParticipant, useRemoteParticipants } = useCallStateHooks();
+    const localParticipant = useLocalParticipant();
+    const remoteParticipants = useRemoteParticipants();
 
     // Map Stream participants identifying them as remote peers
     const peers: Record<string, any> = {};
-    if (streamCall.activeCall) {
-        streamCall.activeCall.state.participants.forEach((p: any) => {
-            if (p.userId === currentUserUuid) return;
-            peers[p.userId] = {
-                stream: null,
-                connectionState: 'connected',
-                isSpeaking: p.isSpeaking,
-                isMuted: !p.audioEnabled,
-                isCameraOn: p.videoEnabled
-            };
-        });
-    }
+    remoteParticipants.forEach((p: any) => {
+        peers[p.userId] = {
+            stream: p.videoStream || p.audioStream || null,
+            connectionState: 'connected',
+            isSpeaking: p.isSpeaking,
+            isMuted: !p.audioEnabled,
+            isCameraOn: p.videoEnabled,
+            avatar: p.image,
+            username: p.name || `User-${p.userId.slice(0, 8)}`
+        };
+    });
 
     return {
-        localStream: null,
+        activeCall: streamCall.activeCall, // Return the call object for Provider usage
+        localStream: localParticipant?.videoStream || null,
         peers,
         isMuted: streamCall.activeCall?.microphone?.state?.status === 'disabled',
         isCameraOn: streamCall.activeCall?.camera?.state?.status === 'enabled',

@@ -18,9 +18,10 @@ import { useCall } from '@/hooks/call/use-call'
 import CallOverlay from '@/components/call/call-overlay'
 import IncomingCallDialog from '@/components/call/incoming-call-dialog'
 import { Chat } from 'stream-chat-react'
-import { StreamVideo } from '@stream-io/video-react-sdk'
+import { StreamVideo, StreamCall } from '@stream-io/video-react-sdk'
 import { useStreamChat } from '@/hooks/stream/use-stream-chat'
 import { useStreamVideo } from '@/hooks/stream/use-stream-video'
+import { useStreamVideoCall } from '@/hooks/stream/use-stream-video-call'
 import 'stream-chat-react/dist/css/v2/index.css'
 
 type Theme = 'purple' | 'blue' | 'green' | 'orange' | 'pink'
@@ -214,7 +215,23 @@ interface AuthenticatedAppProps {
   handleUpdateAvatar: (a: string) => void;
 }
 
-function AuthenticatedApp({
+function AuthenticatedApp(props: AuthenticatedAppProps) {
+  const streamCall = useStreamVideoCall(props.currentUser?.uuid || null, props.videoClient);
+
+  const content = <AuthenticatedAppContent {...props} streamCall={streamCall} />;
+
+  if (streamCall.activeCall) {
+    return (
+      <StreamCall call={streamCall.activeCall}>
+        {content}
+      </StreamCall>
+    );
+  }
+
+  return content;
+}
+
+function AuthenticatedAppContent({
   currentUser,
   videoClient,
   isConnected,
@@ -232,8 +249,9 @@ function AuthenticatedApp({
   selectedConversation,
   setSelectedConversation,
   handleLogout,
-  handleUpdateAvatar
-}: AuthenticatedAppProps) {
+  handleUpdateAvatar,
+  streamCall
+}: AuthenticatedAppProps & { streamCall: any }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<'friends' | 'chats' | 'settings'>('chats')
   const [inputValue, setInputValue] = useState('')
@@ -254,7 +272,7 @@ function AuthenticatedApp({
     rejectCall,
     toggleMute,
     toggleCamera
-  } = useCall(currentUser?.uuid || null, videoClient, undefined, onCallEnded);
+  } = useCall(currentUser?.uuid || null, videoClient, streamCall, onCallEnded);
 
   // Check for Invite Link
   useEffect(() => {
