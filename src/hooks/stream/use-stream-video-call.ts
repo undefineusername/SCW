@@ -17,6 +17,21 @@ export function useStreamVideoCall(currentUserUuid: string | null, videoClient?:
         return () => unsubscribe();
     }, [videoClient, currentUserUuid]);
 
+    // When active call ends (remote leaves, etc.), clean up state
+    useEffect(() => {
+        const call = activeCall;
+        if (!call) return;
+
+        const handleEnded = () => {
+            setActiveCall(null);
+            setIncomingCall(null);
+            console.log('📞 [StreamVideo] Call ended');
+        };
+
+        const unsub = call.on('call.ended', handleEnded);
+        return () => unsub();
+    }, [activeCall]);
+
     const startCall = useCallback(async (targetUuid: string, type: 'default' | 'audio_room' | 'video' | 'voice' = 'default') => {
         if (!videoClient || !currentUserUuid) return;
 
@@ -34,10 +49,15 @@ export function useStreamVideoCall(currentUserUuid: string | null, videoClient?:
                 data: {
                     members,
                     custom: {
-                        callerName: currentUserUuid // Could be actual username
+                        callerName: currentUserUuid
                     }
                 }
             });
+            // Enable devices BEFORE join so remote peer receives our stream
+            await call.microphone.enable();
+            if (streamType === 'default') {
+                await call.camera.enable();
+            }
             await call.join();
             setActiveCall(call);
             console.log('📞 [StreamVideo] Call started:', callId);
@@ -48,6 +68,11 @@ export function useStreamVideoCall(currentUserUuid: string | null, videoClient?:
 
     const joinCall = useCallback(async (call: Call) => {
         try {
+            // Enable devices BEFORE join so remote peer receives our stream
+            await call.microphone.enable();
+            if (call.type === 'default') {
+                await call.camera.enable();
+            }
             await call.join();
             setActiveCall(call);
             setIncomingCall(null);
