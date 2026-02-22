@@ -10,11 +10,12 @@ export function useChatPresence(
     useEffect(() => {
         if (!uuids || (Array.isArray(uuids) && uuids.length === 0) || !isConnected) return;
 
-        const currentUuidsStr = Array.isArray(uuids) ? [...uuids].sort().join(',') : (uuids as string);
-        if (currentUuidsStr === lastUuidsRef.current) return;
-        lastUuidsRef.current = currentUuidsStr;
+        const currentStr = Array.isArray(uuids) ? [...uuids].sort().join(',') : (uuids as string);
+        if (currentStr === lastUuidsRef.current) return;
 
+        lastUuidsRef.current = currentStr;
         const socket = getSocket();
+
         const checkPresence = () => {
             if (socket.connected) {
                 socket.emit('get_presence', uuids);

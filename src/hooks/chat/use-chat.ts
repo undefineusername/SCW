@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { StreamChat } from 'stream-chat';
 import { db } from '@/lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -28,6 +28,12 @@ export function useChat(
     // 1. Actions (sendMessage, markAsRead)
     const { sendMessage, markAsRead } = useChatActions(currentUserUuid, encryptionKey, user, chatClient);
 
+    // Use refs so we can call them in effects without adding to dependency arrays
+    const sendMessageRef = useRef(sendMessage);
+    const markAsReadRef = useRef(markAsRead);
+    sendMessageRef.current = sendMessage;
+    markAsReadRef.current = markAsRead;
+
     // 2. Socket & Message Processing
     const { isConnected, streamTokens } = useChatSocket(
         user,
@@ -39,35 +45,44 @@ export function useChat(
         chatClient
     );
 
-    // Collect all friend UUIDs for presence tracking
-    const friendUuids = useMemo(() => {
-        const ids = friends.map(f => f.uuid);
+    // Collect all friend UUIDs for presence tracking.
+    // Use a stable comma-joined string so the array reference is only recreated when UUIDs actually change —
+    // this prevents useLiveQuery's new-array-each-render from triggering useChatPresence repeatedly.
+    const friendUuidsKey = useMemo(() => {
+        const ids = friends.map(f => f.uuid).sort();
         if (selectedConversationUuid && !ids.includes(selectedConversationUuid)) {
             ids.push(selectedConversationUuid);
+            ids.sort();
         }
-        return ids;
+        return ids.join(',');
     }, [friends, selectedConversationUuid]);
 
-    // 3. Presence Polling (Track all friends + current)
+    const friendUuids = useMemo(
+        () => (friendUuidsKey ? friendUuidsKey.split(',').filter(Boolean) : []),
+        [friendUuidsKey]
+    );
+
+    // 3. Presence Polling
     useChatPresence(friendUuids, isConnected);
 
     // 4. DH Key Management
     useChatKeys(currentUserUuid, isConnected, user);
 
-    // 5. Auto-Mark as Read and Initial Handshake
+    // 5. Auto-Mark as Read and Initial E2EE Handshake
+    // Refs are used so this only triggers on conversation/user change, not every sendMessage recreation
     useEffect(() => {
         if (!selectedConversationUuid || !currentUserUuid) return;
 
-        markAsRead(selectedConversationUuid);
+        markAsReadRef.current(selectedConversationUuid);
 
-        // Proactively send PING to sync avatar and keys when selecting a chat
-        if (selectedConversationUuid && !conversations.find(c => c.id === selectedConversationUuid)?.isGroup) {
-            sendMessage(selectedConversationUuid, JSON.stringify({
+        const conv = conversations.find(c => c.id === selectedConversationUuid);
+        if (!conv?.isGroup) {
+            sendMessageRef.current(selectedConversationUuid, JSON.stringify({
                 system: true,
                 type: 'E2EE_PING'
             }));
         }
-    }, [selectedConversationUuid, currentUserUuid, markAsRead, sendMessage]);
+    }, [selectedConversationUuid, currentUserUuid]); // eslint-disable-line react-hooks/exhaustive-deps
 
     return { isConnected, conversations, sendMessage, presence, streamTokens };
 }
