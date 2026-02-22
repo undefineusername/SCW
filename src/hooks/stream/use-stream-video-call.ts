@@ -39,9 +39,10 @@ export function useStreamVideoCall(currentUserUuid: string | null, videoClient?:
         const streamType = (type === 'voice' || type === 'audio_room') ? 'audio_room' : 'default';
         const call = videoClient.call(streamType, callId);
 
+        // Both participants need admin role to join (JoinBackstage); 'user' role lacks permission
         const members: MemberRequest[] = [
             { user_id: currentUserUuid, role: 'admin' },
-            { user_id: targetUuid, role: 'user' }
+            { user_id: targetUuid, role: 'admin' }
         ];
 
         try {
