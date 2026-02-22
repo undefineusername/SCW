@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { StreamChat } from 'stream-chat';
 import { db } from '@/lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -40,11 +40,13 @@ export function useChat(
     );
 
     // Collect all friend UUIDs for presence tracking
-    const friendUuids = friends.map(f => f.uuid);
-    // Include selected conversation if it's not a friend yet
-    if (selectedConversationUuid && !friendUuids.includes(selectedConversationUuid)) {
-        friendUuids.push(selectedConversationUuid);
-    }
+    const friendUuids = useMemo(() => {
+        const ids = friends.map(f => f.uuid);
+        if (selectedConversationUuid && !ids.includes(selectedConversationUuid)) {
+            ids.push(selectedConversationUuid);
+        }
+        return ids;
+    }, [friends, selectedConversationUuid]);
 
     // 3. Presence Polling (Track all friends + current)
     useChatPresence(friendUuids, isConnected);

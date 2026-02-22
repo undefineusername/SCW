@@ -403,8 +403,13 @@ export function useChatSocket(
             });
 
             socket.on('stream_tokens', (tokens: { apiKey: string; chatToken: string; videoToken: string }) => {
-                console.log('🎫 [Stream] Received tokens from server');
-                setStreamTokens(tokens);
+                setStreamTokens(prev => {
+                    if (prev && prev.apiKey === tokens.apiKey && prev.chatToken === tokens.chatToken && prev.videoToken === tokens.videoToken) {
+                        return prev;
+                    }
+                    console.log('🎫 [Stream] Received new tokens from server');
+                    return tokens;
+                });
             });
 
             // Listen for Stream Messages (Redundancy/P2P Fallback)
@@ -425,21 +430,15 @@ export function useChatSocket(
                 chatClient.on('message.new', streamHandler);
             }
 
-            socket.on('presence_update', async ({ uuid, status, publicKey }: { uuid: string; status: 'online' | 'offline', publicKey?: any }) => {
-                setPresence(prev => ({ ...prev, [uuid]: status }));
+            const handleKeyUpdate = async (uuid: string, publicKey: any) => {
                 if (publicKey && uuid !== currentUserUuid) {
-                    console.log(`👤 Presence update for ${uuid}: status=${status}, key present: ${!!publicKey}`);
                     const friend = await db.friends.get(uuid);
                     const newKeyStr = JSON.stringify(publicKey);
                     const oldKeyStr = friend?.dhPublicKey ? JSON.stringify(friend.dhPublicKey) : null;
 
                     if (newKeyStr !== oldKeyStr) {
                         try {
-                            if (typeof publicKey !== 'object' || Array.isArray(publicKey)) {
-                                console.warn(`⚠️ Received invalid publicKey format from ${uuid}:`, publicKey);
-                                return;
-                            }
-
+                            if (typeof publicKey !== 'object' || Array.isArray(publicKey)) return;
                             await db.friends.update(uuid, { dhPublicKey: publicKey });
                             const account = await db.accounts.get(currentUserUuid!);
                             if (account?.dhPrivateKey) {
@@ -450,6 +449,32 @@ export function useChatSocket(
                             console.error(`❌ Failed to process public key from ${uuid}:`, e);
                         }
                     }
+                }
+            };
+
+            socket.on('presence_update', async ({ uuid, status, publicKey }: { uuid: string; status: 'online' | 'offline', publicKey?: any }) => {
+                setPresence(prev => {
+                    if (prev[uuid] === status) return prev;
+                    return { ...prev, [uuid]: status };
+                });
+                await handleKeyUpdate(uuid, publicKey);
+            });
+
+            socket.on('presence_all', async (data: { uuid: string; status: 'online' | 'offline'; publicKey?: any }[]) => {
+                setPresence(prev => {
+                    let hasChanges = false;
+                    const next = { ...prev };
+                    for (const item of data) {
+                        if (prev[item.uuid] !== item.status) {
+                            next[item.uuid] = item.status;
+                            hasChanges = true;
+                        }
+                    }
+                    return hasChanges ? next : prev;
+                });
+
+                for (const item of data) {
+                    await handleKeyUpdate(item.uuid, item.publicKey);
                 }
             });
 
@@ -462,6 +487,7 @@ export function useChatSocket(
                 socket.off('msg_ack_push', onReadReceipts);
                 socket.off('call_participants_list');
                 socket.off('presence_update');
+                socket.off('presence_all');
                 socket.off('stream_tokens');
                 if (chatClient && streamHandler) {
                     chatClient.off('message.new', streamHandler);
