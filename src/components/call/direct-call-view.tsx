@@ -19,6 +19,7 @@ interface DirectCallViewProps {
     duration: number;
     elapsed: number;
     formatDuration: (s: number) => string;
+    isVideoCall?: boolean;
 }
 
 export default function DirectCallView({
@@ -34,7 +35,8 @@ export default function DirectCallView({
     isDark,
     duration,
     elapsed,
-    formatDuration
+    formatDuration,
+    isVideoCall = true
 }: DirectCallViewProps) {
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
     const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -156,31 +158,39 @@ export default function DirectCallView({
             {/* Bottom Controls */}
             <div className="absolute bottom-10 inset-x-0 z-40 flex justify-center gap-6">
                 <button
+                    type="button"
                     onClick={onToggleMute}
                     className={`p-5 rounded-full transition-all flex items-center justify-center backdrop-blur-md shadow-lg transform hover:scale-110 active:scale-95 ${isMuted
                         ? 'bg-white text-red-500'
                         : 'bg-white/20 hover:bg-white/30 text-white'
                         }`}
+                    title={isMuted ? 'Unmute' : 'Mute'}
                 >
                     {isMuted ? <MicOff size={32} /> : <Mic size={32} />}
                 </button>
 
                 <button
+                    type="button"
                     onClick={onLeave}
                     className="p-5 rounded-full bg-red-500 text-white shadow-lg shadow-red-500/30 transform hover:scale-110 active:scale-95 hover:bg-red-600 transition-all"
+                    title="End call"
                 >
                     <PhoneOff size={32} />
                 </button>
 
-                <button
-                    onClick={onToggleCamera}
-                    className={`p-5 rounded-full transition-all flex items-center justify-center backdrop-blur-md shadow-lg transform hover:scale-110 active:scale-95 ${!isCameraOn
-                        ? 'bg-white text-red-500'
-                        : 'bg-white/20 hover:bg-white/30 text-white'
-                        }`}
-                >
-                    {!isCameraOn ? <VideoOff size={32} /> : <Video size={32} />}
-                </button>
+                {isVideoCall && (
+                    <button
+                        type="button"
+                        onClick={onToggleCamera}
+                        className={`p-5 rounded-full transition-all flex items-center justify-center backdrop-blur-md shadow-lg transform hover:scale-110 active:scale-95 ${!isCameraOn
+                            ? 'bg-white text-red-500'
+                            : 'bg-white/20 hover:bg-white/30 text-white'
+                            }`}
+                        title={isCameraOn ? 'Turn off camera' : 'Turn on camera'}
+                    >
+                        {!isCameraOn ? <VideoOff size={32} /> : <Video size={32} />}
+                    </button>
+                )}
             </div>
 
             {/* Audio for remote */}

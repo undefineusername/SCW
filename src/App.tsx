@@ -286,6 +286,8 @@ function AuthenticatedAppContent({
     activeCall,
     localStream,
     peers,
+    callType,
+    isVideoCall,
     isMuted: isCallMuted,
     isCameraOn,
     isCallActive,
@@ -782,7 +784,8 @@ function AuthenticatedAppContent({
       <CallOverlay
         activeCall={activeCall}
         isOpen={isCallActive}
-        callType={isCameraOn ? 'video' : 'voice'}
+        callType={callType}
+        isVideoCall={isVideoCall}
         peers={Object.entries(peers).reduce((acc, [uuid, peer]) => {
           const friend = (friends ?? []).find((f: any) => f.uuid === uuid);
           const conv = (conversations ?? []).find((c: any) => c.id === uuid);
@@ -806,8 +809,8 @@ function AuthenticatedAppContent({
 
       <IncomingCallDialog
         isOpen={!!webRTCIncomingCall}
-        callerName={(conversations ?? []).find((c: any) => c.id === webRTCIncomingCall?.from)?.username || (friends ?? []).find((f: any) => f.uuid === webRTCIncomingCall?.from)?.username || 'Unknown Caller'}
-        callerAvatar={(conversations ?? []).find((c: any) => c.id === webRTCIncomingCall?.from)?.avatar || (friends ?? []).find((f: any) => f.uuid === webRTCIncomingCall?.from)?.avatar}
+        callerName={(friends ?? []).find((f: any) => f.uuid === webRTCIncomingCall?.from)?.username || (conversations ?? []).find((c: any) => c.id === webRTCIncomingCall?.from)?.username || (webRTCIncomingCall?.from ? `User ${String(webRTCIncomingCall.from).slice(0, 8)}` : 'Unknown Caller')}
+        callerAvatar={(friends ?? []).find((f: any) => f.uuid === webRTCIncomingCall?.from)?.avatar || (conversations ?? []).find((c: any) => c.id === webRTCIncomingCall?.from)?.avatar}
         onAccept={async () => {
           if (webRTCIncomingCall) {
             await acceptCall();

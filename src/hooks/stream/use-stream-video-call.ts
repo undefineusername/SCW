@@ -4,13 +4,19 @@ import { StreamVideoClient, Call, type MemberRequest } from '@stream-io/video-re
 export function useStreamVideoCall(currentUserUuid: string | null, videoClient?: StreamVideoClient | null) {
     const [activeCall, setActiveCall] = useState<Call | null>(null);
     const [incomingCall, setIncomingCall] = useState<Call | null>(null);
+    const [incomingCallerId, setIncomingCallerId] = useState<string | null>(null);
+    const [incomingCallType, setIncomingCallType] = useState<'default' | 'audio_room'>('default');
 
     useEffect(() => {
         if (!videoClient) return;
 
-        const unsubscribe = videoClient.on('call.created', (event) => {
-            if (event.call && event.call.created_by.id !== currentUserUuid) {
-                setIncomingCall(videoClient.call(event.call.type, event.call.id));
+        const unsubscribe = videoClient.on('call.created', (event: any) => {
+            if (event.call && event.call.created_by?.id !== currentUserUuid) {
+                const callerId = event.call.created_by?.id;
+                const callType = event.call.type || 'default';
+                setIncomingCallerId(callerId || null);
+                setIncomingCallType(callType === 'audio_room' ? 'audio_room' : 'default');
+                setIncomingCall(videoClient.call(callType, event.call.id));
             }
         });
 
@@ -25,6 +31,7 @@ export function useStreamVideoCall(currentUserUuid: string | null, videoClient?:
         const handleEnded = () => {
             setActiveCall(null);
             setIncomingCall(null);
+            setIncomingCallerId(null);
             console.log('📞 [StreamVideo] Call ended');
         };
 
@@ -85,6 +92,7 @@ export function useStreamVideoCall(currentUserUuid: string | null, videoClient?:
             await call.join();
             setActiveCall(call);
             setIncomingCall(null);
+            setIncomingCallerId(null);
             console.log('📞 [StreamVideo] Call joined:', call.id);
         } catch (err) {
             console.error('❌ [StreamVideo] Failed to join call:', err);
@@ -102,12 +110,15 @@ export function useStreamVideoCall(currentUserUuid: string | null, videoClient?:
     const rejectCall = useCallback(() => {
         if (incomingCall) {
             setIncomingCall(null);
+            setIncomingCallerId(null);
         }
     }, [incomingCall]);
 
     return {
         activeCall,
         incomingCall,
+        incomingCallerId,
+        incomingCallType,
         startCall,
         joinCall,
         leaveCall,

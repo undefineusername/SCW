@@ -35,15 +35,24 @@ export const useCall = (
         };
     });
 
+    const callType = (activeCall?.type === 'audio_room' ? 'voice' : 'video') as 'voice' | 'video';
+    const isVideoCall = activeCall?.type === 'default';
+
     return {
         activeCall,
         localStream: localParticipant?.videoStream ?? null,
         peers,
+        callType,
+        isVideoCall,
         isMuted: activeCall?.microphone?.state?.status === 'disabled',
         isCameraOn: activeCall?.camera?.state?.status === 'enabled',
         isCallActive: !!activeCall,
         incomingCall: streamCall?.incomingCall
-            ? { from: streamCall.incomingCall.id, type: 'video' as const, signal: {} }
+            ? {
+                from: streamCall.incomingCallerId || streamCall.incomingCall?.id,
+                type: (streamCall.incomingCallType === 'audio_room' ? 'voice' : 'video') as 'voice' | 'video',
+                signal: {}
+            }
             : null,
         joinCall: (groupId: string, type: 'video' | 'voice') =>
             streamCall?.startCall?.(groupId, type === 'video' ? 'default' : 'audio_room'),
@@ -51,6 +60,6 @@ export const useCall = (
         acceptCall: () => streamCall?.incomingCall && streamCall?.joinCall?.(streamCall.incomingCall),
         rejectCall: streamCall?.rejectCall ?? (() => { }),
         toggleMute: () => activeCall?.microphone?.toggle?.(),
-        toggleCamera: () => activeCall?.camera?.toggle?.(),
+        toggleCamera: () => isVideoCall && activeCall?.camera?.toggle?.(),
     };
 };

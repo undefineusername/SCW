@@ -24,6 +24,7 @@ interface GroupCallViewProps {
     formatDuration: (s: number) => string;
     groupName: string;
     isVoiceCall: boolean;
+    isVideoCall?: boolean;
 }
 
 export default function GroupCallView({
@@ -39,7 +40,8 @@ export default function GroupCallView({
     duration,
     formatDuration,
     groupName,
-    isVoiceCall
+    isVoiceCall,
+    isVideoCall = true
 }: GroupCallViewProps) {
     const participantCount = Object.keys(peers).length + (localStream ? 1 : 0);
 
@@ -99,23 +101,38 @@ export default function GroupCallView({
             {/* Bottom Controls (Grid View Style) */}
             <div className="p-10 flex justify-center gap-6 z-10">
                 <button
+                    type="button"
                     onClick={onToggleMute}
                     className={`p-5 rounded-full transition-all flex items-center justify-center ${isMuted
                         ? 'bg-red-500 text-white shadow-lg shadow-red-500/30'
                         : 'bg-white/10 hover:bg-white/20 text-white border border-white/10'
                         }`}
+                    title={isMuted ? 'Unmute' : 'Mute'}
                 >
                     {isMuted ? <MicOff size={28} /> : <Mic size={28} />}
                 </button>
 
+                {isVideoCall && (
+                    <button
+                        type="button"
+                        onClick={onToggleCamera}
+                        className={`p-5 rounded-full transition-all flex items-center justify-center ${!isCameraOn
+                            ? 'bg-red-500 text-white shadow-lg shadow-red-500/30'
+                            : 'bg-white/10 hover:bg-white/20 text-white border border-white/10'
+                            }`}
+                        title={isCameraOn ? 'Turn off camera' : 'Turn on camera'}
+                    >
+                        {!isCameraOn ? <VideoOff size={28} /> : <Video size={28} />}
+                    </button>
+                )}
+
                 <button
-                    onClick={onToggleCamera}
-                    className={`p-5 rounded-full transition-all flex items-center justify-center ${!isCameraOn
-                        ? 'bg-red-500 text-white shadow-lg shadow-red-500/30'
-                        : 'bg-white/10 hover:bg-white/20 text-white border border-white/10'
-                        }`}
+                    type="button"
+                    onClick={onLeave}
+                    className="p-5 rounded-full bg-red-500 text-white shadow-lg shadow-red-500/30 hover:bg-red-600 transition-all"
+                    title="End call"
                 >
-                    {!isCameraOn ? <VideoOff size={28} /> : <Video size={28} />}
+                    <PhoneOff size={24} />
                 </button>
             </div>
         </div>

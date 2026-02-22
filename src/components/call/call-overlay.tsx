@@ -4,12 +4,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useState } from 'react';
 import type { CallType } from '@/hooks/call/use-call';
 import DirectCallView from './direct-call-view';
+import DirectVoiceCallView from './direct-voice-call-view';
 import GroupCallView from './group-call-view';
 
 interface CallOverlayProps {
     activeCall: any;
     isOpen: boolean;
     callType: CallType;
+    isVideoCall?: boolean;
     peers: Record<string, {
         sessionId?: string;
         stream: MediaStream | null;
@@ -34,6 +36,7 @@ export default function CallOverlay({
     activeCall,
     isOpen,
     callType,
+    isVideoCall = true,
     peers,
     localStream,
     isMuted,
@@ -70,10 +73,8 @@ export default function CallOverlay({
     };
 
     const peerCount = Object.keys(peers).length;
-    // Show Direct Call View if there is exactly 1 remote peer, or 0 (waiting state)
-    // Actually, distinct 1:1 view is best when we have a specific peer.
-    // If it's a "Group" call logic but only 2 people, treat as Direct.
     const isDirectCall = peerCount <= 1;
+    const isVoice = callType === 'voice';
 
     return (
         <AnimatePresence mode="wait">
@@ -84,7 +85,18 @@ export default function CallOverlay({
                     exit={{ opacity: 0 }}
                     className="fixed inset-0 z-50 bg-black text-white"
                 >
-                    {isDirectCall ? (
+                    {isDirectCall && isVoice ? (
+                        <DirectVoiceCallView
+                            peerData={Object.values(peers)[0] || {}}
+                            isMuted={isMuted}
+                            onToggleMute={onToggleMute}
+                            onLeave={onLeave}
+                            isDark={isDark}
+                            duration={duration}
+                            elapsed={elapsed}
+                            formatDuration={formatDuration}
+                        />
+                    ) : isDirectCall ? (
                         <DirectCallView
                             activeCall={activeCall}
                             peerData={Object.values(peers)[0] || {}}
@@ -99,6 +111,7 @@ export default function CallOverlay({
                             duration={duration}
                             elapsed={elapsed}
                             formatDuration={formatDuration}
+                            isVideoCall={isVideoCall}
                         />
                     ) : (
                         <GroupCallView
@@ -114,7 +127,8 @@ export default function CallOverlay({
                             duration={duration}
                             formatDuration={formatDuration}
                             groupName={groupName}
-                            isVoiceCall={callType === 'voice'}
+                            isVoiceCall={isVoice}
+                            isVideoCall={isVideoCall}
                         />
                     )}
                 </motion.div>
