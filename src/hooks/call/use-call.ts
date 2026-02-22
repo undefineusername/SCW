@@ -19,11 +19,12 @@ export const useCall = (
     const participants: any[] = activeCall?.state?.participants ?? [];
     const localParticipant = activeCall?.state?.localParticipant ?? null;
 
-    // Map remote participants to peers
+    // Map remote participants to peers (sessionId needed for bindVideoElement)
     const peers: Record<string, any> = {};
     participants.forEach((p: any) => {
         if (p.isLocalParticipant) return; // skip self
         peers[p.userId] = {
+            sessionId: p.sessionId,
             stream: p.videoStream || p.audioStream || null,
             connectionState: 'connected',
             isSpeaking: p.isSpeaking,

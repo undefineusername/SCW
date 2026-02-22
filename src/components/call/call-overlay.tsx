@@ -7,9 +7,11 @@ import DirectCallView from './direct-call-view';
 import GroupCallView from './group-call-view';
 
 interface CallOverlayProps {
+    activeCall: any;
     isOpen: boolean;
     callType: CallType;
     peers: Record<string, {
+        sessionId?: string;
         stream: MediaStream | null;
         username?: string;
         avatar?: string;
@@ -29,6 +31,7 @@ interface CallOverlayProps {
 }
 
 export default function CallOverlay({
+    activeCall,
     isOpen,
     callType,
     peers,
@@ -43,16 +46,19 @@ export default function CallOverlay({
     groupName
 }: CallOverlayProps) {
     const [duration, setDuration] = useState(0);
+    const [elapsed, setElapsed] = useState(0); // Always increments when call open (for "waiting" state)
     const hasConnectedPeer = Object.values(peers).some(p => p.connectionState === 'connected');
 
     useEffect(() => {
         let timer: any;
-        if (isOpen && hasConnectedPeer) {
+        if (isOpen) {
             timer = setInterval(() => {
-                setDuration(prev => prev + 1);
+                setElapsed((e) => e + 1);
+                if (hasConnectedPeer) setDuration((d) => d + 1);
             }, 1000);
-        } else if (!isOpen) {
+        } else {
             setDuration(0);
+            setElapsed(0);
         }
         return () => clearInterval(timer);
     }, [isOpen, hasConnectedPeer]);
@@ -80,6 +86,7 @@ export default function CallOverlay({
                 >
                     {isDirectCall ? (
                         <DirectCallView
+                            activeCall={activeCall}
                             peerData={Object.values(peers)[0] || {}}
                             localStream={localStream}
                             isMuted={isMuted}
@@ -90,6 +97,7 @@ export default function CallOverlay({
                             onLeave={onLeave}
                             isDark={isDark}
                             duration={duration}
+                            elapsed={elapsed}
                             formatDuration={formatDuration}
                         />
                     ) : (

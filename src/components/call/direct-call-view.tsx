@@ -6,7 +6,8 @@ import { useEffect, useState, useRef } from 'react';
 import AudioStream from './audio-stream';
 
 interface DirectCallViewProps {
-    peerData: { stream: MediaStream | null; username?: string; avatar?: string; isSpeaking?: boolean };
+    activeCall: any;
+    peerData: { sessionId?: string; stream: MediaStream | null; username?: string; avatar?: string; isSpeaking?: boolean };
     localStream: MediaStream | null;
     isMuted: boolean;
     isCameraOn: boolean;
@@ -16,10 +17,12 @@ interface DirectCallViewProps {
     onLeave: () => void;
     isDark: boolean;
     duration: number;
+    elapsed: number;
     formatDuration: (s: number) => string;
 }
 
 export default function DirectCallView({
+    activeCall,
     peerData,
     localStream,
     isMuted,
@@ -30,34 +33,46 @@ export default function DirectCallView({
     onLeave,
     isDark,
     duration,
+    elapsed,
     formatDuration
 }: DirectCallViewProps) {
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
     const localVideoRef = useRef<HTMLVideoElement>(null);
+    const sessionId = peerData.sessionId;
+    const hasRemotePeer = !!sessionId && !!activeCall;
     const [hasRemoteVideo, setHasRemoteVideo] = useState(() => {
-        return !!(peerData.stream?.getVideoTracks()[0]?.enabled);
+        return !!(peerData.stream?.getVideoTracks?.()?.[0]?.enabled);
     });
 
+    // Stream SDK: bind video element so remote track is attached correctly (fixes "상대방 영상 안 보임")
     useEffect(() => {
-        if (remoteVideoRef.current && peerData.stream) {
+        if (!activeCall || !sessionId || !remoteVideoRef.current) return;
+        const cleanup = activeCall.bindVideoElement(remoteVideoRef.current, sessionId, 'videoTrack');
+        return () => cleanup?.();
+    }, [activeCall, sessionId]);
+
+    // Fallback: also sync srcObject if stream is set (e.g. before bindVideoElement attaches)
+    useEffect(() => {
+        if (remoteVideoRef.current && peerData.stream && !hasRemotePeer) {
             remoteVideoRef.current.srcObject = peerData.stream;
             remoteVideoRef.current.play().catch(console.error);
-
-            const videoTrack = peerData.stream.getVideoTracks()[0];
-            if (videoTrack) {
-                if (hasRemoteVideo !== videoTrack.enabled) {
-                    setHasRemoteVideo(videoTrack.enabled);
-                }
-                const onEnabled = () => setHasRemoteVideo(true);
-                const onDisabled = () => setHasRemoteVideo(false);
-                videoTrack.addEventListener('mute', onDisabled);
-                videoTrack.addEventListener('unmute', onEnabled);
-                return () => {
-                    videoTrack.removeEventListener('mute', onDisabled);
-                    videoTrack.removeEventListener('unmute', onEnabled);
-                };
-            }
         }
+    }, [peerData.stream, hasRemotePeer]);
+
+    useEffect(() => {
+        const stream = peerData.stream;
+        if (!stream?.getVideoTracks) return;
+        const videoTrack = stream.getVideoTracks()[0];
+        if (!videoTrack) return;
+        const onEnabled = () => setHasRemoteVideo(true);
+        const onDisabled = () => setHasRemoteVideo(false);
+        if (hasRemoteVideo !== videoTrack.enabled) setHasRemoteVideo(videoTrack.enabled);
+        videoTrack.addEventListener('mute', onDisabled);
+        videoTrack.addEventListener('unmute', onEnabled);
+        return () => {
+            videoTrack.removeEventListener('mute', onDisabled);
+            videoTrack.removeEventListener('unmute', onEnabled);
+        };
     }, [peerData.stream]);
 
     useEffect(() => {
@@ -71,7 +86,7 @@ export default function DirectCallView({
         <div className={`relative w-full h-full flex items-center justify-center overflow-hidden ${isDark ? 'bg-gray-900' : 'bg-gray-100'}`}>
             {/* Remote Peer (Full Screen) */}
             <div className="absolute inset-0 z-0">
-                {peerData.stream && hasRemoteVideo ? (
+                {hasRemotePeer ? (
                     <video
                         ref={remoteVideoRef}
                         autoPlay
@@ -87,9 +102,11 @@ export default function DirectCallView({
                                 <User size={64} className="text-gray-500" />
                             )}
                         </div>
-                        <h2 className="text-3xl font-bold">{peerData.username || (duration < 3 ? 'Connecting...' : 'Call Ended')}</h2>
+                        <h2 className="text-3xl font-bold">
+                            {peerData.username || (elapsed < 10 ? 'Ringing...' : elapsed < 30 ? 'No answer yet' : 'Call ended')}
+                        </h2>
                         <p className="animate-pulse opacity-70">
-                            {peerData.username ? `Call ${formatDuration(duration)}` : 'Please wait...'}
+                            {peerData.username ? `Call ${formatDuration(duration)}` : `Waiting... ${elapsed}s`}
                         </p>
                     </div>
                 )}
@@ -100,7 +117,7 @@ export default function DirectCallView({
             <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black/80 to-transparent z-10 pointer-events-none" />
 
             {/* Header Info (only if video is on, otherwise centered above) */}
-            {hasRemoteVideo && peerData.stream && (
+            {hasRemotePeer && (
                 <div className="absolute top-6 left-6 z-20 text-white">
                     <h2 className="text-2xl font-bold shadow-black/50 drop-shadow-md">{peerData.username || 'Unknown'}</h2>
                     <p className="text-white/80 text-sm font-medium">{formatDuration(duration)}</p>

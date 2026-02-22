@@ -283,6 +283,7 @@ function AuthenticatedAppContent({
   const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(null);
 
   const {
+    activeCall,
     localStream,
     peers,
     isMuted: isCallMuted,
@@ -779,6 +780,7 @@ function AuthenticatedAppContent({
       />
 
       <CallOverlay
+        activeCall={activeCall}
         isOpen={isCallActive}
         callType={isCameraOn ? 'video' : 'voice'}
         peers={Object.entries(peers).reduce((acc, [uuid, peer]) => {
