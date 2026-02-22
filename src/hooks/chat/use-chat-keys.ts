@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { db } from '@/lib/db';
 import { generateDHKeyPair } from '@/lib/crypto';
 import { getSocket } from '@/lib/socket';
@@ -8,6 +8,10 @@ export function useChatKeys(
     isConnected: boolean,
     user: { username: string; salt?: string; kdfParams?: any } | null
 ) {
+    // Keep a ref to user so we can read current values without depending on the object reference
+    const userRef = useRef(user);
+    userRef.current = user;
+
     useEffect(() => {
         if (!currentUserUuid) return;
 
@@ -25,19 +29,19 @@ export function useChatKeys(
                 console.log("✅ DH Keys Generated and Saved.");
             }
 
-            if (account?.dhPublicKey && isConnected) {
+            if (account?.dhPublicKey && isConnected && userRef.current) {
                 const socket = getSocket();
                 // Re-register to ensure server has our public key
                 socket.emit('register_master', {
                     uuid: currentUserUuid,
-                    username: user!.username,
-                    salt: user!.salt,
-                    kdfParams: user!.kdfParams,
+                    username: userRef.current.username,
+                    salt: userRef.current.salt,
+                    kdfParams: userRef.current.kdfParams,
                     publicKey: account.dhPublicKey
                 });
                 console.log("📤 Public Key Synced to Server.");
             }
         };
         checkAndSyncKeys();
-    }, [currentUserUuid, isConnected, user]);
+    }, [currentUserUuid, isConnected]); // Removed 'user' object — read via ref instead
 }

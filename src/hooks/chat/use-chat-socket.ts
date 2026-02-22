@@ -28,6 +28,8 @@ export function useChatSocket(
     const onWebRTCSignalRef = useRef(onWebRTCSignal);
     const onCallParticipantsListRef = useRef(onCallParticipantsList);
     const socketRef = useRef<any>(null);
+    const userRef = useRef(user);
+    userRef.current = user; // Always up-to-date, without triggering re-renders
 
     useEffect(() => {
         onWebRTCSignalRef.current = onWebRTCSignal;
@@ -44,10 +46,10 @@ export function useChatSocket(
             if (!isMounted) return;
 
             const socket = registerMaster({
-                uuid: user!.uuid,
-                username: user!.username,
-                salt: user!.salt,
-                kdfParams: user!.kdfParams,
+                uuid: userRef.current!.uuid,
+                username: userRef.current!.username,
+                salt: userRef.current!.salt,
+                kdfParams: userRef.current!.kdfParams,
                 publicKey: account?.dhPublicKey
             });
             socketRef.current = socket;
@@ -190,7 +192,7 @@ export function useChatSocket(
                                         const conv = await db.conversations.get(data.from);
                                         if (conv) await db.conversations.update(data.from, { avatar: payload.avatar });
                                     }
-                                    if (payload.type === 'E2EE_PING') sendMessage(data.from, JSON.stringify({ system: true, type: 'E2EE_PONG', username: user?.username, avatar: user?.avatar }));
+                                    if (payload.type === 'E2EE_PING') sendMessage(data.from, JSON.stringify({ system: true, type: 'E2EE_PONG', username: userRef.current?.username, avatar: userRef.current?.avatar }));
                                     return;
                                 } else if (payload.type === 'WEBRTC_SIGNAL' && onWebRTCSignalRef.current) {
                                     onWebRTCSignalRef.current(data.from, payload.signal);
@@ -262,7 +264,7 @@ export function useChatSocket(
             isMounted = false;
             cleanupPromise.then(cleanup => cleanup?.());
         };
-    }, [currentUserUuid, encryptionKey, user, selectedConversationUuid]); // Removed sendMessage, setPresence, chatClient
+    }, [currentUserUuid, encryptionKey, selectedConversationUuid]); // 'user' removed — read via userRef
 
     // 2. Separate Stream Listener (Break Dependency Cycle)
     useEffect(() => {
